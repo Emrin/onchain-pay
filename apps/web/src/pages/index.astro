@@ -1,5 +1,4 @@
 ---
-
 ---
 
 <html lang="en">
@@ -9,9 +8,32 @@
 		<link rel="icon" href="/favicon.ico" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
+		<title>Crypto Demo</title>
+		<style>
+			body { font-family: system-ui, sans-serif; max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
+			button { padding: 0.5rem 1.25rem; font-size: 1rem; cursor: pointer; }
+			#result { margin-top: 1rem; color: #333; }
+			#result.error { color: #c00; }
+		</style>
 	</head>
 	<body>
-		<h1>Astro</h1>
+		<h1>Crypto Demo</h1>
+		<button id="hello-btn">Test API Connection</button>
+		<p id="result"></p>
+		<script>
+			document.getElementById('hello-btn')?.addEventListener('click', async () => {
+				const result = document.getElementById('result')!;
+				result.className = '';
+				result.textContent = 'Loading...';
+				try {
+					const res = await fetch('http://localhost:3000/hello');
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					result.textContent = await res.text();
+				} catch (e) {
+					result.className = 'error';
+					result.textContent = `Error: ${e instanceof Error ? e.message : 'Could not reach API'}`;
+				}
+			});
+		</script>
 	</body>
 </html>
