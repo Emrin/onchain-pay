@@ -1,4 +1,5 @@
 ---
+import Layout from '../layouts/Layout.astro';
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 let error = '';
 
@@ -26,7 +27,7 @@ if (Astro.request.method === 'POST') {
       return Astro.redirect('/');
     } else {
       const body = await res.json();
-      error = body.message ?? 'Signup failed';
+      error = Array.isArray(body.message) ? body.message[0] : (body.message ?? 'Signup failed');
     }
   } catch {
     error = 'Could not reach API';
@@ -34,28 +35,40 @@ if (Astro.request.method === 'POST') {
 }
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>Sign Up — Crypto Demo</title>
-    <style>
-      body { font-family: system-ui, sans-serif; max-width: 400px; margin: 4rem auto; padding: 0 1rem; }
-      label { display: block; margin-top: 1rem; }
-      input { width: 100%; padding: 0.4rem; margin-top: 0.25rem; box-sizing: border-box; }
-      button { margin-top: 1.5rem; padding: 0.5rem 1.25rem; font-size: 1rem; cursor: pointer; }
-      .error { color: #c00; margin-top: 1rem; }
-    </style>
-  </head>
-  <body>
-    <h1>Sign Up</h1>
-    {error && <p class="error">{error}</p>}
-    <form method="POST">
-      <label>Email <input type="email" name="email" required /></label>
-      <label>Password (min 8 chars) <input type="password" name="password" minlength="8" required /></label>
-      <label>Name (optional) <input type="text" name="name" /></label>
-      <button type="submit">Create account</button>
-    </form>
-    <p><a href="/login">Already have an account? Log in</a></p>
-  </body>
-</html>
+<Layout title="Sign Up — Crypto Demo">
+  <div class="min-h-screen flex items-center justify-center p-4">
+    <div class="card w-full max-w-sm bg-base-100 shadow-xl">
+      <div class="card-body gap-4">
+        <h1 class="card-title text-2xl">Sign Up</h1>
+
+        {error && (
+          <div role="alert" class="alert alert-error text-sm">{error}</div>
+        )}
+
+        <form method="POST" class="flex flex-col gap-3">
+          <label class="form-control">
+            <div class="label"><span class="label-text">Email</span></div>
+            <input type="email" name="email" required class="input input-bordered w-full" />
+          </label>
+
+          <label class="form-control">
+            <div class="label"><span class="label-text">Password</span></div>
+            <input type="password" name="password" minlength="8" required class="input input-bordered w-full" />
+            <div class="label"><span class="label-text-alt">Minimum 8 characters</span></div>
+          </label>
+
+          <label class="form-control">
+            <div class="label"><span class="label-text">Name <span class="text-base-content/50">(optional)</span></span></div>
+            <input type="text" name="name" class="input input-bordered w-full" />
+          </label>
+
+          <button type="submit" class="btn btn-primary w-full mt-2">Create account</button>
+        </form>
+
+        <p class="text-sm text-center">
+          Already have an account? <a href="/login" class="link link-primary">Log in</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</Layout>

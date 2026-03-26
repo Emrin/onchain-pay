@@ -1,57 +1,49 @@
 ---
+import Layout from '../layouts/Layout.astro';
 const token = Astro.cookies.get('token')?.value;
 const isLoggedIn = !!token;
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Crypto Demo</title>
-		<style>
-			body { font-family: system-ui, sans-serif; max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
-			button { padding: 0.5rem 1.25rem; font-size: 1rem; cursor: pointer; }
-			#result { margin-top: 1rem; color: #333; }
-			#result.error { color: #c00; }
-			.auth-links { margin-top: 1.5rem; }
-			.auth-links a { margin-right: 1rem; }
-		</style>
-	</head>
-	<body>
-		<h1>Crypto Demo</h1>
+<Layout title="Crypto Demo">
+  <div class="min-h-screen flex flex-col items-center justify-center p-4">
+    <div class="card w-full max-w-md bg-base-100 shadow-xl">
+      <div class="card-body gap-4">
+        <h1 class="card-title text-2xl">Crypto Demo</h1>
 
-		{isLoggedIn ? (
-			<div class="auth-links">
-				<span>Logged in</span>
-				<a href="/logout">Log out</a>
-			</div>
-		) : (
-			<div class="auth-links">
-				<a href="/login">Log in</a>
-				<a href="/signup">Sign up</a>
-			</div>
-		)}
+        {isLoggedIn ? (
+          <p class="text-success font-medium">Logged in</p>
+          <div class="card-actions">
+            <a href="/logout" class="btn btn-outline btn-sm">Log out</a>
+          </div>
+        ) : (
+          <div class="card-actions">
+            <a href="/login" class="btn btn-primary">Log in</a>
+            <a href="/signup" class="btn btn-outline">Sign up</a>
+          </div>
+        )}
 
-		<button id="hello-btn">Test API Connection</button>
-		<p id="result"></p>
-		<script>
-			const apiBase = import.meta.env.PUBLIC_API_URL || '';
-			document.getElementById('hello-btn')?.addEventListener('click', async () => {
-				const result = document.getElementById('result')!;
-				result.className = '';
-				result.textContent = 'Loading...';
-				try {
-					const res = await fetch(`${apiBase}/api/hello`);
-					if (!res.ok) throw new Error(`HTTP ${res.status}`);
-					result.textContent = await res.text();
-				} catch (e) {
-					result.className = 'error';
-					result.textContent = `Error: ${e instanceof Error ? e.message : 'Could not reach API'}`;
-				}
-			});
-		</script>
-	</body>
-</html>
+        <div class="divider"></div>
+
+        <button id="hello-btn" class="btn btn-secondary">Test API Connection</button>
+        <p id="result" class="text-sm"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const apiBase = import.meta.env.PUBLIC_API_URL || '';
+    document.getElementById('hello-btn')?.addEventListener('click', async () => {
+      const result = document.getElementById('result')!;
+      result.className = 'text-sm';
+      result.textContent = 'Loading...';
+      try {
+        const res = await fetch(`${apiBase}/api/hello`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        result.textContent = await res.text();
+      } catch (e) {
+        result.classList.add('text-error');
+        result.textContent = `Error: ${e instanceof Error ? e.message : 'Could not reach API'}`;
+      }
+    });
+  </script>
+</Layout>

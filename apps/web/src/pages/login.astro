@@ -1,4 +1,5 @@
 ---
+import Layout from '../layouts/Layout.astro';
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 let error = '';
 
@@ -32,27 +33,34 @@ if (Astro.request.method === 'POST') {
 }
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>Log In — Crypto Demo</title>
-    <style>
-      body { font-family: system-ui, sans-serif; max-width: 400px; margin: 4rem auto; padding: 0 1rem; }
-      label { display: block; margin-top: 1rem; }
-      input { width: 100%; padding: 0.4rem; margin-top: 0.25rem; box-sizing: border-box; }
-      button { margin-top: 1.5rem; padding: 0.5rem 1.25rem; font-size: 1rem; cursor: pointer; }
-      .error { color: #c00; margin-top: 1rem; }
-    </style>
-  </head>
-  <body>
-    <h1>Log In</h1>
-    {error && <p class="error">{error}</p>}
-    <form method="POST">
-      <label>Email <input type="email" name="email" required /></label>
-      <label>Password <input type="password" name="password" required /></label>
-      <button type="submit">Log in</button>
-    </form>
-    <p><a href="/signup">No account? Sign up</a></p>
-  </body>
-</html>
+<Layout title="Log In — Crypto Demo">
+  <div class="min-h-screen flex items-center justify-center p-4">
+    <div class="card w-full max-w-sm bg-base-100 shadow-xl">
+      <div class="card-body gap-4">
+        <h1 class="card-title text-2xl">Log In</h1>
+
+        {error && (
+          <div role="alert" class="alert alert-error text-sm">{error}</div>
+        )}
+
+        <form method="POST" class="flex flex-col gap-3">
+          <label class="form-control">
+            <div class="label"><span class="label-text">Email</span></div>
+            <input type="email" name="email" required class="input input-bordered w-full" />
+          </label>
+
+          <label class="form-control">
+            <div class="label"><span class="label-text">Password</span></div>
+            <input type="password" name="password" required class="input input-bordered w-full" />
+          </label>
+
+          <button type="submit" class="btn btn-primary w-full mt-2">Log in</button>
+        </form>
+
+        <p class="text-sm text-center">
+          No account? <a href="/signup" class="link link-primary">Sign up</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</Layout>
