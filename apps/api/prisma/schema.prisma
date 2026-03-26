@@ -15,6 +15,7 @@ model User {
   mnemonicHash      String        @default("")
   mnemonicConfirmed Boolean       @default(false)
   balanceSats       BigInt        @default(0)
+  balanceLitoshi    BigInt        @default(0)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   transactions Transaction[]
@@ -27,6 +28,7 @@ model Transaction {
   invoiceId  String    @unique
   amountSats BigInt
   address    String    @default("")
+  currency   String    @default("BTC")
   status     String    @default("pending")
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())

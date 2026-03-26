@@ -2,18 +2,22 @@
 import Layout from '../../layouts/Layout.astro';
 
 const token = Astro.cookies.get('token')?.value;
-if (!token) {
-  return Astro.redirect('/login');
-}
+if (!token) return Astro.redirect('/login');
 
 const { invoiceId } = Astro.params;
 const urlParams = new URL(Astro.request.url).searchParams;
 const address = urlParams.get('address') ?? '';
 const amountSatsRaw = urlParams.get('amountSats') ?? '0';
+const currency = urlParams.get('currency') ?? 'BTC';
 const amountSats = Number(amountSatsRaw);
-const amountBtc = (amountSats / 1e8).toFixed(8);
+const amountDecimal = (amountSats / 1e8).toFixed(8);
+const unit = currency === 'LTC' ? 'litoshis' : 'sats';
 
 const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
+
+const mineCmd = currency === 'LTC'
+  ? `kubectl exec -n crypto-demo deployment/litecoind -- litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=litecoin generatetoaddress 1 ${address}`
+  : `kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=bitcoin generatetoaddress 1 ${address}`;
 ---
 
 <Layout title="Pay Invoice">
@@ -21,7 +25,7 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
     <div class="card w-full max-w-lg bg-base-100 shadow-xl">
       <div class="card-body gap-5">
         <div class="flex items-center justify-between">
-          <h1 class="card-title text-2xl">Bitcoin Payment</h1>
+          <h1 class="card-title text-2xl">{currency} Payment</h1>
           <span id="status-badge" class="badge badge-warning badge-lg">pending</span>
         </div>
 
@@ -43,23 +47,17 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
               value={address}
               class="input input-bordered w-full font-mono text-sm"
             />
-            <button
-              id="copy-btn"
-              class="btn btn-outline btn-sm"
-              title="Copy address"
-            >
-              Copy
-            </button>
+            <button id="copy-btn" class="btn btn-outline btn-sm" title="Copy address">Copy</button>
           </div>
         </div>
 
         <div class="stats stats-vertical sm:stats-horizontal shadow w-full">
           <div class="stat">
-            <div class="stat-title">Amount (BTC)</div>
-            <div class="stat-value text-primary text-xl">{amountBtc}</div>
+            <div class="stat-title">Amount ({currency})</div>
+            <div class="stat-value text-primary text-xl">{amountDecimal}</div>
           </div>
           <div class="stat">
-            <div class="stat-title">Amount (sats)</div>
+            <div class="stat-title">Amount ({unit})</div>
             <div class="stat-value text-xl">{amountSats.toLocaleString()}</div>
           </div>
         </div>
@@ -73,7 +71,7 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
             <p class="text-xs text-base-content/70 mb-2">
               On regtest, transactions need a mined block to settle. Run:
             </p>
-            <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code id="mine-cmd">kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=bitcoin generatetoaddress 1 {address}</code></pre>
+            <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code id="mine-cmd">{mineCmd}</code></pre>
           </div>
         </div>
 
@@ -94,7 +92,6 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
     const successAlert = document.getElementById('success-alert');
     const copyBtn = document.getElementById('copy-btn');
 
-    // Copy address to clipboard
     copyBtn?.addEventListener('click', () => {
       const input = copyBtn.previousElementSibling;
       if (input instanceof HTMLInputElement) {
@@ -106,20 +103,15 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
       }
     });
 
-    // Poll for status every 5 seconds
     let polling = true;
 
     function updateBadge(status) {
       if (!statusBadge) return;
       statusBadge.textContent = status;
       statusBadge.className = 'badge badge-lg';
-      if (status === 'settled') {
-        statusBadge.classList.add('badge-success');
-      } else if (status === 'pending') {
-        statusBadge.classList.add('badge-warning');
-      } else {
-        statusBadge.classList.add('badge-error');
-      }
+      if (status === 'settled') statusBadge.classList.add('badge-success');
+      else if (status === 'pending') statusBadge.classList.add('badge-warning');
+      else statusBadge.classList.add('badge-error');
     }
 
     async function pollStatus() {
@@ -134,15 +126,10 @@ const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
             if (successAlert) successAlert.classList.remove('hidden');
           }
         }
-      } catch {
-        // silently ignore network errors during polling
-      }
-      if (polling) {
-        setTimeout(pollStatus, 5000);
-      }
+      } catch { /* ignore */ }
+      if (polling) setTimeout(pollStatus, 5000);
     }
 
-    // Start polling after initial delay
     setTimeout(pollStatus, 5000);
   </script>
 </Layout>

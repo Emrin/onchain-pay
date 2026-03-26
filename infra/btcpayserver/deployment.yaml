@@ -59,6 +59,10 @@ spec:
               value: http://btcpayserver:14142
             - name: BTCPAY_BTCEXPLORERURL
               value: http://nbxplorer:32838
+            - name: BTCPAY_CHAINS
+              value: "btc,ltc"
+            - name: BTCPAY_LTCEXPLORERURL
+              value: http://nbxplorer:32838
             - name: BTCPAY_POSTGRES
               valueFrom:
                 secretKeyRef:

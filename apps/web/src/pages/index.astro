@@ -16,6 +16,8 @@ if (token) {
 
 let balanceSats: string | null = null;
 let balanceBtc: string | null = null;
+let balanceLitoshi: string | null = null;
+let balanceLtc: string | null = null;
 
 if (isLoggedIn && token) {
   try {
@@ -23,9 +25,11 @@ if (isLoggedIn && token) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
-      const data = (await res.json()) as { balanceSats: string };
+      const data = (await res.json()) as { balanceSats: string; balanceLitoshi: string };
       balanceSats = data.balanceSats;
       balanceBtc = (Number(data.balanceSats) / 1e8).toFixed(8);
+      balanceLitoshi = data.balanceLitoshi;
+      balanceLtc = (Number(data.balanceLitoshi) / 1e8).toFixed(8);
     }
   } catch {
     // best-effort
@@ -48,9 +52,14 @@ if (isLoggedIn && token) {
             {balanceSats !== null && (
               <div class="stats shadow w-full">
                 <div class="stat">
-                  <div class="stat-title">Balance</div>
-                  <div class="stat-value text-primary text-xl">{balanceBtc} BTC</div>
+                  <div class="stat-title">BTC</div>
+                  <div class="stat-value text-primary text-lg">{balanceBtc}</div>
                   <div class="stat-desc">{Number(balanceSats).toLocaleString()} sats</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-title">LTC</div>
+                  <div class="stat-value text-secondary text-lg">{balanceLtc}</div>
+                  <div class="stat-desc">{Number(balanceLitoshi).toLocaleString()} litoshis</div>
                 </div>
               </div>
             )}

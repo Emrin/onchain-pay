@@ -7,7 +7,6 @@ if (!token) return Astro.redirect('/login');
 const API_URL = process.env.API_URL || 'http://api:3000';
 const headers = { Authorization: `Bearer ${token}` };
 
-// Handle delete form submission
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const id = form.get('id');
@@ -22,6 +21,7 @@ type Tx = {
   invoiceId: string;
   amountSats: string;
   address: string;
+  currency: string;
   status: string;
   createdAt: string;
 };
@@ -31,15 +31,19 @@ const [balanceRes, txRes] = await Promise.all([
   fetch(`${API_URL}/api/deposits/transactions`, { headers }),
 ]);
 
-const { balanceSats } = balanceRes.ok ? await balanceRes.json() : { balanceSats: '0' };
+const { balanceSats, balanceLitoshi } = balanceRes.ok
+  ? await balanceRes.json()
+  : { balanceSats: '0', balanceLitoshi: '0' };
+
 const { pending, history } = txRes.ok
   ? await txRes.json()
   : { pending: [], history: [] };
 
 const balanceBtc = (Number(balanceSats) / 1e8).toFixed(8);
+const balanceLtc = (Number(balanceLitoshi) / 1e8).toFixed(8);
 
-function satsToDisplay(sats: string) {
-  return `${Number(sats).toLocaleString()} sats (${(Number(sats) / 1e8).toFixed(8)} BTC)`;
+function toDecimal(units: string) {
+  return (Number(units) / 1e8).toFixed(8);
 }
 ---
 
@@ -51,36 +55,48 @@ function satsToDisplay(sats: string) {
       <a href="/" class="btn btn-ghost btn-sm">Back</a>
     </div>
 
-    <!-- Balance -->
+    <!-- Balances -->
     <div class="stats shadow w-full">
       <div class="stat">
-        <div class="stat-title">Balance</div>
-        <div class="stat-value text-primary text-2xl">{balanceBtc} BTC</div>
+        <div class="stat-title">BTC Balance</div>
+        <div class="stat-value text-primary text-xl">{balanceBtc} BTC</div>
         <div class="stat-desc">{Number(balanceSats).toLocaleString()} sats</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">LTC Balance</div>
+        <div class="stat-value text-secondary text-xl">{balanceLtc} LTC</div>
+        <div class="stat-desc">{Number(balanceLitoshi).toLocaleString()} litoshis</div>
       </div>
     </div>
 
-    <!-- Pending invoice -->
-    {(pending as Tx[]).length > 0 ? (
+    <!-- Pending invoices -->
+    <a href="/deposit" class="btn btn-primary w-full">+ New Deposit</a>
+
+    {(pending as Tx[]).length > 0 && (
       <div class="card bg-base-100 shadow">
         <div class="card-body gap-3">
-          <h2 class="card-title text-lg">Pending Deposit</h2>
+          <h2 class="card-title text-lg">Pending Deposits</h2>
           {(pending as Tx[]).map((tx) => (
             <div class="flex flex-col gap-1 text-sm">
               <div class="flex items-center gap-2">
                 <span class="badge badge-warning">pending</span>
-                <span class="font-medium">{satsToDisplay(tx.amountSats)}</span>
+                <span class="badge badge-outline badge-sm">{tx.currency}</span>
+                <span class="font-medium">
+                  {toDecimal(tx.amountSats)} {tx.currency}
+                  <span class="text-base-content/50 text-xs ml-1">({Number(tx.amountSats).toLocaleString()} {tx.currency === 'LTC' ? 'litoshis' : 'sats'})</span>
+                </span>
               </div>
               <div class="text-base-content/60 font-mono text-xs break-all">Invoice: {tx.invoiceId}</div>
-              <a href={`/deposit/${tx.invoiceId}?amountSats=${tx.amountSats}&address=${encodeURIComponent(tx.address)}`} class="btn btn-sm btn-outline mt-1 w-fit">
+              <a
+                href={`/deposit/${tx.invoiceId}?amountSats=${tx.amountSats}&address=${encodeURIComponent(tx.address)}&currency=${tx.currency}`}
+                class="btn btn-sm btn-outline mt-1 w-fit"
+              >
                 View payment details
               </a>
             </div>
           ))}
         </div>
       </div>
-    ) : (
-      <a href="/deposit" class="btn btn-primary w-full">+ New Deposit</a>
     )}
 
     <!-- Transaction history -->
@@ -96,6 +112,7 @@ function satsToDisplay(sats: string) {
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Currency</th>
                   <th>Amount</th>
                   <th>Status</th>
                   <th></th>
@@ -107,8 +124,11 @@ function satsToDisplay(sats: string) {
                     <td class="text-xs text-base-content/70">
                       {new Date(tx.createdAt).toLocaleString()}
                     </td>
+                    <td>
+                      <span class="badge badge-outline badge-sm">{tx.currency}</span>
+                    </td>
                     <td class="font-mono text-sm">
-                      {Number(tx.amountSats).toLocaleString()} sats
+                      {toDecimal(tx.amountSats)} {tx.currency}
                     </td>
                     <td>
                       <span class={`badge badge-sm ${tx.status === 'settled' ? 'badge-success' : 'badge-error'}`}>

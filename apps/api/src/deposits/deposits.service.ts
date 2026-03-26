@@ -24,28 +24,30 @@ export class DepositsService {
   async createDeposit(
     userId: number,
     amountSats: number,
+    currency: string,
   ): Promise<{
     invoiceId: string;
     amountSats: string;
     address: string;
+    currency: string;
     status: string;
   }> {
-    // Enforce 1 pending invoice per user
+    // Enforce 1 pending invoice per user per currency
     const existing = await this.prisma.transaction.findFirst({
-      where: { userId, status: 'pending', deletedAt: null },
+      where: { userId, currency, status: 'pending', deletedAt: null },
     });
     if (existing) {
       throw new ConflictException({
-        message: 'You already have a pending deposit',
+        message: `You already have a pending ${currency} deposit`,
         invoiceId: existing.invoiceId,
         amountSats: existing.amountSats.toString(),
         address: existing.address,
+        currency: existing.currency,
       });
     }
 
-    const amountBtc = (amountSats / 1e8).toFixed(8);
+    const amountDecimal = (amountSats / 1e8).toFixed(8);
 
-    // Create invoice via BtcPayServer Greenfield API
     const invoiceRes = await fetch(
       `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices`,
       {
@@ -55,9 +57,10 @@ export class DepositsService {
           Authorization: `token ${this.apiKey}`,
         },
         body: JSON.stringify({
-          amount: amountBtc,
-          currency: 'BTC',
+          amount: amountDecimal,
+          currency,
           metadata: { userId },
+          paymentMethods: [`${currency}-CHAIN`],
         }),
       },
     );
@@ -65,28 +68,22 @@ export class DepositsService {
     if (!invoiceRes.ok) {
       const text = await invoiceRes.text();
       this.logger.error(`BtcPayServer invoice creation failed: ${text}`);
-      throw new InternalServerErrorException(
-        'Failed to create payment invoice',
-      );
+      throw new InternalServerErrorException('Failed to create payment invoice');
     }
 
     const invoice = (await invoiceRes.json()) as { id: string; status: string };
     const invoiceId = invoice.id;
 
-    // Fetch payment methods to get on-chain BTC address
+    // Fetch payment methods to get the on-chain address
     const pmRes = await fetch(
       `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices/${invoiceId}/payment-methods`,
-      {
-        headers: {
-          Authorization: `token ${this.apiKey}`,
-        },
-      },
+      { headers: { Authorization: `token ${this.apiKey}` } },
     );
 
     if (!pmRes.ok) {
       const text = await pmRes.text();
       this.logger.error(`BtcPayServer payment-methods fetch failed: ${text}`);
-      throw new InternalServerErrorException('Failed to retrieve BTC address');
+      throw new InternalServerErrorException('Failed to retrieve payment address');
     }
 
     const paymentMethods = (await pmRes.json()) as Array<{
@@ -94,25 +91,23 @@ export class DepositsService {
       destination: string;
     }>;
 
-    const btcMethod = paymentMethods.find(
-      (pm) => pm.paymentMethodId === 'BTC-CHAIN',
+    const method = paymentMethods.find(
+      (pm) => pm.paymentMethodId === `${currency}-CHAIN`,
     );
 
-    if (!btcMethod) {
+    if (!method) {
       throw new InternalServerErrorException(
-        'BTC on-chain payment method not found',
+        `${currency} on-chain payment method not found`,
       );
     }
 
-    const address = btcMethod.destination;
-
-    // Store pending transaction in DB
     await this.prisma.transaction.create({
       data: {
         userId,
         invoiceId,
         amountSats: BigInt(amountSats),
-        address,
+        address: method.destination,
+        currency,
         status: 'pending',
       },
     });
@@ -120,7 +115,8 @@ export class DepositsService {
     return {
       invoiceId,
       amountSats: amountSats.toString(),
-      address,
+      address: method.destination,
+      currency,
       status: 'pending',
     };
   }
@@ -130,7 +126,6 @@ export class DepositsService {
     signature: string,
     rawBody: Buffer,
   ): Promise<void> {
-    // Verify HMAC-SHA256 signature: header format "sha256=<hex>"
     const expectedSig =
       'sha256=' +
       createHmac('sha256', this.webhookSecret)
@@ -145,15 +140,11 @@ export class DepositsService {
     const event = payload as {
       type: string;
       invoiceId?: string;
-      metadata?: { userId?: number };
     };
 
     this.logger.log(`Webhook event: ${event.type} invoiceId=${event.invoiceId}`);
 
-    if (event.type !== 'InvoiceSettled') {
-      // Acknowledge but take no action for other event types
-      return;
-    }
+    if (event.type !== 'InvoiceSettled') return;
 
     const invoiceId = event.invoiceId;
     if (!invoiceId) {
@@ -170,60 +161,58 @@ export class DepositsService {
     }
 
     if (transaction.status === 'settled') {
-      this.logger.log(
-        `Transaction ${invoiceId} already settled, skipping duplicate webhook`,
-      );
+      this.logger.log(`Transaction ${invoiceId} already settled, skipping`);
       return;
     }
 
-    // Fetch actual paid amount from BtcPayServer (covers overpayment)
+    // Fetch actual paid amount (handles overpayment)
     const pmRes = await fetch(
       `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices/${invoiceId}/payment-methods`,
       { headers: { Authorization: `token ${this.apiKey}` } },
     );
 
-    let creditSats = transaction.amountSats;
+    let creditUnits = transaction.amountSats;
     if (pmRes.ok) {
       const methods = (await pmRes.json()) as Array<{
         paymentMethodId: string;
         totalPaid: string;
       }>;
-      const btc = methods.find((m) => m.paymentMethodId === 'BTC-CHAIN');
-      if (btc && btc.totalPaid) {
-        const paidSats = BigInt(Math.round(parseFloat(btc.totalPaid) * 1e8));
-        if (paidSats > 0n) creditSats = paidSats;
+      const method = methods.find(
+        (m) => m.paymentMethodId === `${transaction.currency}-CHAIN`,
+      );
+      if (method?.totalPaid) {
+        const paid = BigInt(Math.round(parseFloat(method.totalPaid) * 1e8));
+        if (paid > 0n) creditUnits = paid;
       }
     }
 
-    // Credit actual paid amount atomically
+    // Credit the correct balance based on currency
+    const balanceField =
+      transaction.currency === 'LTC' ? 'balanceLitoshi' : 'balanceSats';
+
     await this.prisma.$transaction([
       this.prisma.transaction.update({
         where: { invoiceId },
-        data: { status: 'settled', amountSats: creditSats },
+        data: { status: 'settled', amountSats: creditUnits },
       }),
       this.prisma.user.update({
         where: { id: transaction.userId },
-        data: { balanceSats: { increment: creditSats } },
+        data: { [balanceField]: { increment: creditUnits } },
       }),
     ]);
 
     this.logger.log(
-      `Credited ${creditSats} sats to user ${transaction.userId} (invoiced ${transaction.amountSats})`,
+      `Credited ${creditUnits} ${transaction.currency} units to user ${transaction.userId}`,
     );
   }
 
-  async getInvoiceStatus(
-    invoiceId: string,
-  ): Promise<{ status: string }> {
+  async getInvoiceStatus(invoiceId: string): Promise<{ status: string }> {
     const transaction = await this.prisma.transaction.findUnique({
       where: { invoiceId },
       select: { status: true },
     });
 
-    if (!transaction) {
-      throw new BadRequestException('Invoice not found');
-    }
-
+    if (!transaction) throw new BadRequestException('Invoice not found');
     return { status: transaction.status };
   }
 
@@ -239,7 +228,6 @@ export class DepositsService {
     const serialize = (tx: (typeof txs)[number]) => ({
       ...tx,
       amountSats: tx.amountSats.toString(),
-      address: tx.address,
     });
 
     return {
@@ -254,9 +242,7 @@ export class DepositsService {
     if (!tx || tx.deletedAt !== null) {
       throw new BadRequestException('Transaction not found');
     }
-    if (tx.userId !== userId) {
-      throw new ForbiddenException();
-    }
+    if (tx.userId !== userId) throw new ForbiddenException();
     if (tx.status === 'pending') {
       throw new BadRequestException('Cannot remove a pending invoice');
     }
@@ -267,16 +253,19 @@ export class DepositsService {
     });
   }
 
-  async getUserBalance(userId: number): Promise<{ balanceSats: string }> {
+  async getUserBalance(
+    userId: number,
+  ): Promise<{ balanceSats: string; balanceLitoshi: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { balanceSats: true },
+      select: { balanceSats: true, balanceLitoshi: true },
     });
 
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
+    if (!user) throw new BadRequestException('User not found');
 
-    return { balanceSats: user.balanceSats.toString() };
+    return {
+      balanceSats: user.balanceSats.toString(),
+      balanceLitoshi: user.balanceLitoshi.toString(),
+    };
   }
 }

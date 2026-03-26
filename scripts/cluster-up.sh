@@ -56,6 +56,7 @@ kubectl apply -f "${ROOT}/infra/api/"
 kubectl apply -f "${ROOT}/infra/web/"
 kubectl apply -f "${ROOT}/infra/ingress.yaml"
 kubectl apply -f "${ROOT}/infra/bitcoind/"
+kubectl apply -f "${ROOT}/infra/litecoind/"
 kubectl apply -f "${ROOT}/infra/nbxplorer/"
 kubectl apply -f "${ROOT}/infra/btcpayserver/"
 
@@ -71,6 +72,7 @@ kubectl rollout status deployment/redis -n crypto-demo --timeout=120s
 kubectl rollout status deployment/api -n crypto-demo --timeout=120s
 kubectl rollout status deployment/web -n crypto-demo --timeout=120s
 kubectl rollout status deployment/bitcoind -n crypto-demo --timeout=120s
+kubectl rollout status deployment/litecoind -n crypto-demo --timeout=120s
 kubectl rollout status deployment/nbxplorer -n crypto-demo --timeout=120s
 kubectl rollout status deployment/btcpayserver -n crypto-demo --timeout=300s
 

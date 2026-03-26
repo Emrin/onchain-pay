@@ -57,6 +57,8 @@ spec:
               value: "0.0.0.0:32838"
             - name: NBXPLORER_NOAUTH
               value: "1"
+            - name: NBXPLORER_CHAINS
+              value: "BTC,LTC"
             - name: NBXPLORER_BTCRPCURL
               value: http://bitcoind:18443
             - name: NBXPLORER_BTCRPCUSER
@@ -65,6 +67,14 @@ spec:
               value: bitcoin
             - name: NBXPLORER_BTCNODEENDPOINT
               value: bitcoind:18444
+            - name: NBXPLORER_LTCRPCURL
+              value: http://litecoind:19443
+            - name: NBXPLORER_LTCRPCUSER
+              value: litecoin
+            - name: NBXPLORER_LTCRPCPASSWORD
+              value: litecoin
+            - name: NBXPLORER_LTCNODEENDPOINT
+              value: litecoind:19444
             - name: NBXPLORER_POSTGRES
               valueFrom:
                 secretKeyRef:

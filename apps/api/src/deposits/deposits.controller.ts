@@ -32,7 +32,7 @@ export class DepositsController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateDepositDto,
   ) {
-    return this.depositsService.createDeposit(req.user.id, dto.amountSats);
+    return this.depositsService.createDeposit(req.user.id, dto.amountSats, dto.currency);
   }
 
   @Post('webhook')
