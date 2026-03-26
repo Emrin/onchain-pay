@@ -10,8 +10,7 @@ datasource db {
 
 model User {
   id           Int           @id @default(autoincrement())
-  email        String        @unique
-  name         String?
+  username     String        @unique
   passwordHash String        @default("")
   balanceSats  BigInt        @default(0)
   createdAt    DateTime      @default(now())
@@ -20,10 +19,10 @@ model User {
 }
 
 model Transaction {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   userId     Int
-  user       User     @relation(fields: [userId], references: [id])
-  invoiceId  String   @unique
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoiceId  String    @unique
   amountSats BigInt
   address    String    @default("")
   status     String    @default("pending")

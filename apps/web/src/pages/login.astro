@@ -5,14 +5,14 @@ let error = '';
 
 if (Astro.request.method === 'POST') {
   const data = await Astro.request.formData();
-  const email = data.get('email') as string;
+  const username = data.get('username') as string;
   const password = data.get('password') as string;
 
   try {
     const res = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ username, password }),
     });
 
     if (res.ok) {
@@ -25,7 +25,7 @@ if (Astro.request.method === 'POST') {
       });
       return Astro.redirect('/');
     } else {
-      error = 'Invalid email or password';
+      error = 'Invalid username or password';
     }
   } catch {
     error = 'Could not reach API';
@@ -45,8 +45,8 @@ if (Astro.request.method === 'POST') {
 
         <form method="POST" class="flex flex-col gap-3">
           <label class="form-control">
-            <div class="label"><span class="label-text">Email</span></div>
-            <input type="email" name="email" required class="input input-bordered w-full" />
+            <div class="label"><span class="label-text">Username</span></div>
+            <input type="text" name="username" required class="input input-bordered w-full" />
           </label>
 
           <label class="form-control">

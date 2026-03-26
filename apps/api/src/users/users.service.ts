@@ -5,11 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
-  }
-
-  create(data: { email: string; name?: string }) {
-    return this.prisma.user.create({ data });
+  async deleteUser(userId: number): Promise<void> {
+    await this.prisma.user.delete({ where: { id: userId } });
   }
 }

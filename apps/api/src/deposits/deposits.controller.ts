@@ -17,7 +17,7 @@ import { CreateDepositDto } from './dto/create-deposit.dto';
 import { DepositsService } from './deposits.service';
 
 interface AuthenticatedRequest extends Request {
-  user: { id: number; email: string };
+  user: { id: number; username: string };
   rawBody: Buffer;
 }
 

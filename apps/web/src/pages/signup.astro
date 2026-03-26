@@ -5,15 +5,14 @@ let error = '';
 
 if (Astro.request.method === 'POST') {
   const data = await Astro.request.formData();
-  const email = data.get('email') as string;
+  const username = data.get('username') as string;
   const password = data.get('password') as string;
-  const name = data.get('name') as string | undefined;
 
   try {
     const res = await fetch(`${API_URL}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name: name || undefined }),
+      body: JSON.stringify({ username, password }),
     });
 
     if (res.ok) {
@@ -47,19 +46,15 @@ if (Astro.request.method === 'POST') {
 
         <form method="POST" class="flex flex-col gap-3">
           <label class="form-control">
-            <div class="label"><span class="label-text">Email</span></div>
-            <input type="email" name="email" required class="input input-bordered w-full" />
+            <div class="label"><span class="label-text">Username</span></div>
+            <input type="text" name="username" minlength="3" required class="input input-bordered w-full" />
+            <div class="label"><span class="label-text-alt">At least 3 characters</span></div>
           </label>
 
           <label class="form-control">
             <div class="label"><span class="label-text">Password</span></div>
             <input type="password" name="password" minlength="8" required class="input input-bordered w-full" />
             <div class="label"><span class="label-text-alt">Minimum 8 characters</span></div>
-          </label>
-
-          <label class="form-control">
-            <div class="label"><span class="label-text">Name <span class="text-base-content/50">(optional)</span></span></div>
-            <input type="text" name="name" class="input input-bordered w-full" />
           </label>
 
           <button type="submit" class="btn btn-primary w-full mt-2">Create account</button>

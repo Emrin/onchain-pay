@@ -1,17 +1,20 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Controller, Delete, HttpCode, HttpStatus, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UsersService } from './users.service';
+
+interface AuthenticatedRequest extends Request {
+  user: { id: number; username: string };
+}
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Get()
-  findAll() {
-    return this.usersService.findAll();
-  }
-
-  @Post()
-  create(@Body() body: { email: string; name?: string }) {
-    return this.usersService.create(body);
+  @UseGuards(JwtAuthGuard)
+  @Delete('me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteMe(@Req() req: AuthenticatedRequest) {
+    return this.usersService.deleteUser(req.user.id);
   }
 }

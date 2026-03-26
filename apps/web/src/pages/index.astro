@@ -6,15 +6,34 @@ const isLoggedIn = !!token;
 
 const API_URL = process.env.API_URL || 'http://api:3000';
 
+// Handle delete account
+if (Astro.request.method === 'POST' && token) {
+  const form = await Astro.request.formData();
+  if (form.get('_action') === 'delete-account') {
+    await fetch(`${API_URL}/api/users/me`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+    Astro.cookies.delete('token', { path: '/' });
+    return Astro.redirect('/login');
+  }
+}
+
+// Decode username from JWT payload (display only — auth is handled by the API)
+let username: string | null = null;
+if (token) {
+  try {
+    username = JSON.parse(atob(token.split('.')[1])).username ?? null;
+  } catch { /* ignore */ }
+}
+
 let balanceSats: string | null = null;
 let balanceBtc: string | null = null;
 
 if (isLoggedIn && token) {
   try {
     const res = await fetch(`${API_URL}/api/deposits/balance`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
       const data = (await res.json()) as { balanceSats: string };
@@ -22,7 +41,7 @@ if (isLoggedIn && token) {
       balanceBtc = (Number(data.balanceSats) / 1e8).toFixed(8);
     }
   } catch {
-    // Balance fetch is best-effort; don't break the page
+    // best-effort
   }
 }
 ---
@@ -35,7 +54,9 @@ if (isLoggedIn && token) {
 
         {isLoggedIn ? (
           <>
-            <p class="text-success font-medium">Logged in</p>
+            <p class="font-medium">
+              Hello, <span class="text-primary font-semibold">{username}</span>
+            </p>
 
             {balanceSats !== null && (
               <div class="stats shadow w-full">
@@ -51,6 +72,19 @@ if (isLoggedIn && token) {
               <a href="/wallet" class="btn btn-primary">Wallet</a>
               <a href="/logout" class="btn btn-outline btn-sm">Log out</a>
             </div>
+
+            <div class="divider"></div>
+
+            <form method="POST">
+              <input type="hidden" name="_action" value="delete-account" />
+              <button
+                type="submit"
+                class="btn btn-error btn-outline btn-sm"
+                onclick="return confirm('Permanently delete your account and all data? This cannot be undone.')"
+              >
+                Delete account
+              </button>
+            </form>
           </>
         ) : (
           <div class="card-actions">
@@ -58,29 +92,7 @@ if (isLoggedIn && token) {
             <a href="/signup" class="btn btn-outline">Sign up</a>
           </div>
         )}
-
-        <div class="divider"></div>
-
-        <button id="hello-btn" class="btn btn-secondary">Test API Connection</button>
-        <p id="result" class="text-sm"></p>
       </div>
     </div>
   </div>
-
-  <script>
-    const apiBase = import.meta.env.PUBLIC_API_URL || '';
-    document.getElementById('hello-btn')?.addEventListener('click', async () => {
-      const result = document.getElementById('result')!;
-      result.className = 'text-sm';
-      result.textContent = 'Loading...';
-      try {
-        const res = await fetch(`${apiBase}/api/hello`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        result.textContent = await res.text();
-      } catch (e) {
-        result.classList.add('text-error');
-        result.textContent = `Error: ${e instanceof Error ? e.message : 'Could not reach API'}`;
-      }
-    });
-  </script>
 </Layout>
