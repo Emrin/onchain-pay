@@ -2,7 +2,7 @@ import { IsIn, IsInt, Max, Min } from 'class-validator';
 
 export class CreateDepositDto {
   @IsInt()
-  @Min(1000)
+  @Min(546)
   @Max(100000000)
   amountSats!: number;
 

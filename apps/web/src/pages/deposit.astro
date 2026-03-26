@@ -1,5 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import { getPrices, usdToSats, usdToLitoshis } from '../lib/prices';
 
 const token = Astro.cookies.get('token')?.value;
 if (!token) return Astro.redirect('/login');
@@ -8,10 +9,17 @@ const API_URL = process.env.API_URL || 'http://api:3000';
 let errorMessage = '';
 let existingInvoice: { invoiceId: string; amountSats: string; address: string; currency: string } | null = null;
 
+const prices = await getPrices();
+
 if (Astro.request.method === 'POST') {
   const formData = await Astro.request.formData();
-  const amountSats = Number(formData.get('amountSats'));
+  const amountUsd = Number(formData.get('amountUsd'));
   const currency = formData.get('currency') as string;
+
+  const amountSats =
+    currency === 'LTC'
+      ? usdToLitoshis(amountUsd, prices.ltcUsd)
+      : usdToSats(amountUsd, prices.btcUsd);
 
   try {
     const res = await fetch(`${API_URL}/api/deposits`, {
@@ -24,8 +32,11 @@ if (Astro.request.method === 'POST') {
     });
 
     if (res.status === 409) {
-      const body = await res.json().catch(() => ({})) as {
-        invoiceId?: string; amountSats?: string; address?: string; currency?: string;
+      const body = (await res.json().catch(() => ({}))) as {
+        invoiceId?: string;
+        amountSats?: string;
+        address?: string;
+        currency?: string;
       };
       if (body.invoiceId) {
         existingInvoice = {
@@ -38,10 +49,15 @@ if (Astro.request.method === 'POST') {
       }
     } else if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      errorMessage = (body as { message?: string }).message ?? `Request failed with status ${res.status}`;
+      errorMessage =
+        (body as { message?: string }).message ?? `Request failed with status ${res.status}`;
     } else {
       const data = (await res.json()) as {
-        invoiceId: string; amountSats: string; address: string; currency: string; status: string;
+        invoiceId: string;
+        amountSats: string;
+        address: string;
+        currency: string;
+        status: string;
       };
       return Astro.redirect(
         `/deposit/${data.invoiceId}?address=${encodeURIComponent(data.address)}&amountSats=${encodeURIComponent(data.amountSats)}&currency=${data.currency}`,
@@ -58,9 +74,6 @@ if (Astro.request.method === 'POST') {
     <div class="card w-full max-w-md bg-base-100 shadow-xl">
       <div class="card-body gap-4">
         <h1 class="card-title text-2xl">Deposit</h1>
-        <p class="text-sm text-base-content/70" id="hint">
-          Enter the amount in the smallest unit. BTC min 10,000 sats — LTC min 1,000,000 litoshis.
-        </p>
 
         {errorMessage && (
           <div class="alert alert-warning flex flex-col items-start gap-1">
@@ -88,25 +101,37 @@ if (Astro.request.method === 'POST') {
           </div>
 
           <div class="form-control">
-            <label class="label" for="amountSats">
-              <span class="label-text">Amount (sats / litoshis)</span>
+            <label class="label" for="amountUsd">
+              <span class="label-text">Amount (USD)</span>
             </label>
-            <input
-              id="amountSats"
-              name="amountSats"
-              type="number"
-              min="10000"
-              max="100000000"
-              step="1"
-              placeholder="e.g. 100000"
-              required
-              class="input input-bordered w-full"
-            />
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/60 pointer-events-none">$</span>
+              <input
+                id="amountUsd"
+                name="amountUsd"
+                type="number"
+                min="20"
+                max="10000"
+                step="0.01"
+                placeholder="20.00"
+                required
+                class="input input-bordered w-full pl-7"
+              />
+            </div>
             <label class="label">
-              <span class="label-alt text-xs text-base-content/50">
-                1 BTC / LTC = 100,000,000 units
-              </span>
+              <span id="min-hint" class="label-text-alt text-base-content/50">Minimum $20 for BTC — on-chain fees make smaller deposits uneconomical.</span>
             </label>
+          </div>
+
+          <div class="bg-base-200 rounded-lg p-3 text-sm flex flex-col gap-1">
+            <div class="flex justify-between text-base-content/60">
+              <span>Rate</span>
+              <span id="rate-display">—</span>
+            </div>
+            <div class="flex justify-between font-medium">
+              <span class="text-base-content/60">You'll deposit</span>
+              <span id="units-display">—</span>
+            </div>
           </div>
 
           <button type="submit" class="btn btn-primary w-full">
@@ -122,24 +147,42 @@ if (Astro.request.method === 'POST') {
   </div>
 </Layout>
 
-<script>
-  const currencySelect = document.getElementById('currency') as HTMLSelectElement;
-  const amountInput = document.getElementById('amountSats') as HTMLInputElement;
-  const hint = document.getElementById('hint') as HTMLParagraphElement;
+<script define:vars={{ btcUsd: prices.btcUsd, ltcUsd: prices.ltcUsd }}>
+  const currencySelect = document.getElementById('currency');
+  const amountInput = document.getElementById('amountUsd');
+  const rateDisplay = document.getElementById('rate-display');
+  const unitsDisplay = document.getElementById('units-display');
+  const minHint = document.getElementById('min-hint');
 
-  const config: Record<string, { min: number; placeholder: string; hint: string }> = {
-    BTC: { min: 10000,   placeholder: 'e.g. 100000',   hint: 'Enter sats (1 BTC = 100,000,000 sats). Min 10,000 sats.' },
-    LTC: { min: 1000000, placeholder: 'e.g. 1000000', hint: 'Enter litoshis (1 LTC = 100,000,000 litoshis). Min 1,000,000 litoshis.' },
+  const rates = { BTC: btcUsd, LTC: ltcUsd };
+  const unitNames = { BTC: 'sats', LTC: 'litoshis' };
+  const minimums = {
+    BTC: { value: 20,  hint: 'Minimum $20 for BTC — on-chain fees make smaller deposits uneconomical.' },
+    LTC: { value: 5,   hint: 'Minimum $5 for LTC — transaction fees are low.' },
   };
 
   function update() {
-    const c = config[currencySelect.value] ?? config['BTC'];
-    amountInput.min = String(c.min);
-    amountInput.placeholder = c.placeholder;
-    if (Number(amountInput.value) < c.min) amountInput.value = '';
-    hint.textContent = c.hint;
+    const currency = currencySelect.value;
+    const usd = parseFloat(amountInput.value);
+    const rate = rates[currency];
+    const min = minimums[currency];
+
+    amountInput.min = String(min.value);
+    if (minHint) minHint.textContent = min.hint;
+    if (Number(amountInput.value) > 0 && Number(amountInput.value) < min.value) amountInput.value = '';
+
+    rateDisplay.textContent = `1 ${currency} = $${rate.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+
+    if (!isNaN(usd) && usd > 0) {
+      const units = Math.round((usd / rate) * 1e8);
+      const coin = (usd / rate).toFixed(8);
+      unitsDisplay.textContent = `${units.toLocaleString()} ${unitNames[currency]} (${coin} ${currency})`;
+    } else {
+      unitsDisplay.textContent = '—';
+    }
   }
 
   currencySelect.addEventListener('change', update);
+  amountInput.addEventListener('input', update);
   update();
 </script>

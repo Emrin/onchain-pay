@@ -1,5 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import { getPrices, satsToUsd, litoshisToUsd, formatUsd } from '../lib/prices';
 
 const token = Astro.cookies.get('token')?.value;
 if (!token) return Astro.redirect('/login');
@@ -26,9 +27,10 @@ type Tx = {
   createdAt: string;
 };
 
-const [balanceRes, txRes] = await Promise.all([
+const [balanceRes, txRes, prices] = await Promise.all([
   fetch(`${API_URL}/api/deposits/balance`, { headers }),
   fetch(`${API_URL}/api/deposits/transactions`, { headers }),
+  getPrices(),
 ]);
 
 const { balanceSats, balanceLitoshi } = balanceRes.ok
@@ -41,9 +43,19 @@ const { pending, history } = txRes.ok
 
 const balanceBtc = (Number(balanceSats) / 1e8).toFixed(8);
 const balanceLtc = (Number(balanceLitoshi) / 1e8).toFixed(8);
+const balanceBtcUsd = formatUsd(satsToUsd(balanceSats, prices.btcUsd));
+const balanceLtcUsd = formatUsd(litoshisToUsd(balanceLitoshi, prices.ltcUsd));
 
 function toDecimal(units: string) {
   return (Number(units) / 1e8).toFixed(8);
+}
+
+function txToUsd(tx: Tx): string {
+  const usd =
+    tx.currency === 'LTC'
+      ? litoshisToUsd(tx.amountSats, prices.ltcUsd)
+      : satsToUsd(tx.amountSats, prices.btcUsd);
+  return formatUsd(usd);
 }
 ---
 
@@ -59,13 +71,13 @@ function toDecimal(units: string) {
     <div class="stats shadow w-full">
       <div class="stat">
         <div class="stat-title">BTC Balance</div>
-        <div class="stat-value text-primary text-xl">{balanceBtc} BTC</div>
-        <div class="stat-desc">{Number(balanceSats).toLocaleString()} sats</div>
+        <div class="stat-value text-primary text-xl">{balanceBtcUsd}</div>
+        <div class="stat-desc">{balanceBtc} BTC · {Number(balanceSats).toLocaleString()} sats</div>
       </div>
       <div class="stat">
         <div class="stat-title">LTC Balance</div>
-        <div class="stat-value text-secondary text-xl">{balanceLtc} LTC</div>
-        <div class="stat-desc">{Number(balanceLitoshi).toLocaleString()} litoshis</div>
+        <div class="stat-value text-secondary text-xl">{balanceLtcUsd}</div>
+        <div class="stat-desc">{balanceLtc} LTC · {Number(balanceLitoshi).toLocaleString()} litoshis</div>
       </div>
     </div>
 
@@ -113,6 +125,7 @@ function toDecimal(units: string) {
                 <tr>
                   <th>Date</th>
                   <th>Currency</th>
+                  <th>Amount (USD)</th>
                   <th>Amount</th>
                   <th>Status</th>
                   <th></th>
@@ -127,7 +140,8 @@ function toDecimal(units: string) {
                     <td>
                       <span class="badge badge-outline badge-sm">{tx.currency}</span>
                     </td>
-                    <td class="font-mono text-sm">
+                    <td class="font-medium">{txToUsd(tx)}</td>
+                    <td class="font-mono text-sm text-base-content/60">
                       {toDecimal(tx.amountSats)} {tx.currency}
                     </td>
                     <td>

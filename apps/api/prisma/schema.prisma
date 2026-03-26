@@ -21,6 +21,12 @@ model User {
   transactions Transaction[]
 }
 
+model ExchangeRate {
+  pair      String   @id        // e.g. "BTC_USD", "LTC_USD"
+  rate      Float
+  updatedAt DateTime @updatedAt
+}
+
 model Transaction {
   id         Int       @id @default(autoincrement())
   userId     Int
