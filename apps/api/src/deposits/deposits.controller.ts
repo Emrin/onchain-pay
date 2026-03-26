@@ -12,12 +12,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { ConfirmedGuard } from '../auth/confirmed.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateDepositDto } from './dto/create-deposit.dto';
 import { DepositsService } from './deposits.service';
 
 interface AuthenticatedRequest extends Request {
-  user: { id: number; username: string };
+  user: { id: number; username: string; confirmed: boolean };
   rawBody: Buffer;
 }
 
@@ -25,7 +26,7 @@ interface AuthenticatedRequest extends Request {
 export class DepositsController {
   constructor(private readonly depositsService: DepositsService) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, ConfirmedGuard)
   @Post()
   createDeposit(
     @Req() req: AuthenticatedRequest,
@@ -48,13 +49,13 @@ export class DepositsController {
     return this.depositsService.getInvoiceStatus(invoiceId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, ConfirmedGuard)
   @Get('transactions')
   getTransactions(@Req() req: AuthenticatedRequest) {
     return this.depositsService.getUserTransactions(req.user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, ConfirmedGuard)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   softDelete(
@@ -64,7 +65,7 @@ export class DepositsController {
     return this.depositsService.softDeleteTransaction(id, req.user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, ConfirmedGuard)
   @Get('balance')
   getUserBalance(@Req() req: AuthenticatedRequest) {
     return this.depositsService.getUserBalance(req.user.id);
