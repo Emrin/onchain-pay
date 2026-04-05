@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Run from the project root or any subdirectory.
+# Brings up the full k3d cluster.
+#
+#   bash scripts/cluster-up.sh           → mainnet
+#   bash scripts/cluster-up.sh testnet   → regtest/stagenet (fast, no real funds)
+#
 # Requires: k3d, kubectl, docker
 set -euo pipefail
 
 CLUSTER="crypto"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODE="${1:-mainnet}"
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 need() { command -v "$1" &>/dev/null || { echo "ERROR: '$1' not found in PATH"; exit 1; }; }
@@ -14,16 +19,43 @@ need k3d
 need kubectl
 need docker
 
+if [[ "$MODE" != "mainnet" && "$MODE" != "testnet" ]]; then
+  echo "Usage: $0 [mainnet|testnet]"
+  exit 1
+fi
+
+# ── Secret file checks ─────────────────────────────────────────────────────────
+if [[ ! -f "${ROOT}/infra/postgres/secret.env" ]]; then
+  echo "ERROR: infra/postgres/secret.env not found."
+  echo "  cp infra/postgres/secret.env.example infra/postgres/secret.env"
+  exit 1
+fi
+
+WALLET_SECRET="${ROOT}/infra/wallet/secret.yaml"
+WALLET_EXAMPLE="${ROOT}/infra/wallet/secret.yaml.example"
+if [[ "$MODE" == "testnet" ]]; then
+  WALLET_SECRET="${ROOT}/infra/wallet/secret.testnet.yaml"
+  WALLET_EXAMPLE="${ROOT}/infra/wallet/secret.testnet.yaml.example"
+fi
+
+if [[ ! -f "$WALLET_SECRET" ]]; then
+  echo "ERROR: $(basename "$WALLET_SECRET") not found."
+  echo "  cp $(basename "$WALLET_EXAMPLE") $(basename "$WALLET_SECRET") and fill in your values."
+  exit 1
+fi
+
+info "Mode: ${MODE}"
+
 # ── 1. Cluster ─────────────────────────────────────────────────────────────────
 if k3d cluster list | grep -q "^${CLUSTER}"; then
   info "Cluster '${CLUSTER}' already exists, skipping creation"
 else
-  info "Creating k3d cluster '${CLUSTER}' (3 nodes: 1 server + 2 agents)..."
+  info "Creating k3d cluster '${CLUSTER}'..."
   k3d cluster create --config "${ROOT}/infra/k3d-config.yaml"
 fi
 
-# ── 2. Node labels (simulate 3 VPS roles) ──────────────────────────────────────
-info "Labeling nodes with VPS roles..."
+# ── 2. Node labels ──────────────────────────────────────────────────────────────
+info "Labeling nodes..."
 kubectl label node "k3d-${CLUSTER}-server-0" vps-role=gateway --overwrite
 kubectl label node "k3d-${CLUSTER}-agent-0"  vps-role=web     --overwrite
 kubectl label node "k3d-${CLUSTER}-agent-1"  vps-role=api     --overwrite
@@ -32,62 +64,65 @@ kubectl label node "k3d-${CLUSTER}-agent-1"  vps-role=api     --overwrite
 info "Building API image..."
 docker build -f "${ROOT}/apps/api/Dockerfile" -t crypto-api:latest "${ROOT}"
 
-info "Building Web image (PUBLIC_API_URL='' for same-origin ingress routing)..."
+info "Building Web image..."
 docker build -f "${ROOT}/apps/web/Dockerfile" \
   --build-arg PUBLIC_API_URL="" \
   -t crypto-web:latest "${ROOT}"
 
-# ── 4. Import images into cluster ──────────────────────────────────────────────
-info "Importing images into cluster nodes..."
+# ── 4. Import images ───────────────────────────────────────────────────────────
+info "Importing images into cluster..."
 k3d image import crypto-api:latest crypto-web:latest -c "${CLUSTER}"
 
-# ── 5. Apply manifests ─────────────────────────────────────────────────────────
-info "Applying Kubernetes manifests..."
-kubectl apply -f "${ROOT}/infra/namespace.yaml"
+# ── 5. Secrets ─────────────────────────────────────────────────────────────────
+info "Applying secrets..."
+kubectl apply -f "${ROOT}/infra/base/namespace.yaml"
+
 kubectl create secret generic postgres-credentials \
   --from-env-file="${ROOT}/infra/postgres/secret.env" \
   --namespace=crypto-demo \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f "${ROOT}/infra/postgres/pvc.yaml"
-kubectl apply -f "${ROOT}/infra/postgres/deployment.yaml"
-kubectl apply -f "${ROOT}/infra/postgres/service.yaml"
-kubectl apply -f "${ROOT}/infra/redis/"
-kubectl apply -f "${ROOT}/infra/api/"
-kubectl apply -f "${ROOT}/infra/web/"
-kubectl apply -f "${ROOT}/infra/ingress.yaml"
-kubectl apply -f "${ROOT}/infra/bitcoind/"
-kubectl apply -f "${ROOT}/infra/litecoind/"
-kubectl apply -f "${ROOT}/infra/nbxplorer/"
-kubectl apply -f "${ROOT}/infra/btcpayserver/"
 
-# ── 6. Restart deployments to pick up newly imported images ────────────────────
-info "Restarting deployments to pick up new images..."
+kubectl apply -f "$WALLET_SECRET"
+
+# ── 6. Apply manifests via Kustomize ───────────────────────────────────────────
+if [[ "$MODE" == "testnet" ]]; then
+  info "Applying testnet overlay (regtest BTC/LTC + XMR stagenet)..."
+  kubectl apply -k "${ROOT}/infra/overlays/testnet/"
+else
+  info "Applying mainnet manifests..."
+  kubectl apply -k "${ROOT}/infra/base/"
+fi
+
+# ── 7. Restart app deployments to pick up newly imported images ────────────────
+info "Restarting app deployments..."
 kubectl rollout restart deployment/api -n crypto-demo
 kubectl rollout restart deployment/web -n crypto-demo
 
-# ── 7. Wait for rollout ─────────────────────────────────────────────────────────
-info "Waiting for deployments to be ready..."
-kubectl rollout status deployment/postgres -n crypto-demo --timeout=120s
-kubectl rollout status deployment/redis -n crypto-demo --timeout=120s
-kubectl rollout status deployment/api -n crypto-demo --timeout=120s
-kubectl rollout status deployment/web -n crypto-demo --timeout=120s
-kubectl rollout status deployment/bitcoind -n crypto-demo --timeout=120s
-kubectl rollout status deployment/litecoind -n crypto-demo --timeout=120s
-kubectl rollout status deployment/nbxplorer -n crypto-demo --timeout=120s
-kubectl rollout status deployment/btcpayserver -n crypto-demo --timeout=300s
+# ── 8. Wait for core services ──────────────────────────────────────────────────
+info "Waiting for core services..."
+kubectl rollout status deployment/postgres   -n crypto-demo --timeout=120s
+kubectl rollout status deployment/redis      -n crypto-demo --timeout=60s
+kubectl rollout status deployment/tor        -n crypto-demo --timeout=60s
+kubectl rollout status deployment/xmr-wallet -n crypto-demo --timeout=120s
+kubectl rollout status deployment/api        -n crypto-demo --timeout=120s
+kubectl rollout status deployment/web        -n crypto-demo --timeout=120s
 
-# ── 8. Summary ─────────────────────────────────────────────────────────────────
+# ── 9. Summary ─────────────────────────────────────────────────────────────────
 echo ""
-echo "╔══════════════════════════════════════════════════════════════════════╗"
-echo "║         Cluster ready                                                ║"
-echo "╠══════════════════════════════════════════════════════════════════════╣"
-echo "║  Web app      →  http://localhost:8080                               ║"
-echo "║  API          →  http://localhost:8080/api/hello                     ║"
-echo "║  BtcPayServer →  kubectl port-forward -n crypto-demo service/btcpayserver 14142:14142 ║"
-echo "╚══════════════════════════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════════════════════════╗"
+if [[ "$MODE" == "testnet" ]]; then
+echo "║  Cluster ready  [TESTNET / REGTEST]                             ║"
+else
+echo "║  Cluster ready  [MAINNET]                                       ║"
+fi
+echo "╠══════════════════════════════════════════════════════════════════╣"
+echo "║  Web app  →  http://localhost:8080                               ║"
+echo "║  API      →  http://localhost:8080/api/health                    ║"
+if [[ "$MODE" == "mainnet" ]]; then
+echo "╠══════════════════════════════════════════════════════════════════╣"
+echo "║  BTC/LTC deposits unavailable until nodes finish syncing.        ║"
+echo "║  Monitor:  kubectl logs -n crypto-demo deploy/nbxplorer -f       ║"
+fi
+echo "╚══════════════════════════════════════════════════════════════════╝"
 echo ""
-echo "Nodes (simulated VPS servers):"
-kubectl get nodes -L vps-role
-echo ""
-echo "Pods:"
 kubectl get pods -n crypto-demo -o wide

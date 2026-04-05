@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ConfirmedGuard } from '../auth/confirmed.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateDepositDto } from './dto/create-deposit.dto';
@@ -19,9 +20,9 @@ import { DepositsService } from './deposits.service';
 
 interface AuthenticatedRequest extends Request {
   user: { id: number; username: string; confirmed: boolean };
-  rawBody: Buffer;
 }
 
+@SkipThrottle({ auth: true })
 @Controller('deposits')
 export class DepositsController {
   constructor(private readonly depositsService: DepositsService) {}
@@ -33,15 +34,6 @@ export class DepositsController {
     @Body() dto: CreateDepositDto,
   ) {
     return this.depositsService.createDeposit(req.user.id, dto.amountSats, dto.currency);
-  }
-
-  @Post('webhook')
-  @HttpCode(HttpStatus.OK)
-  handleWebhook(@Req() req: AuthenticatedRequest) {
-    const rawBody: Buffer = req.rawBody;
-    const signature = (req.headers['btcpay-sig'] as string) ?? '';
-    const payload = JSON.parse(rawBody.toString('utf8'));
-    return this.depositsService.handleWebhook(payload, signature, rawBody);
   }
 
   @Get('status/:invoiceId')

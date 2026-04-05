@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xmr-wallet
+  namespace: crypto-demo
+spec:
+  template:
+    spec:
+      containers:
+        - name: wallet-rpc
+          args:
+            - --stagenet
+            - --daemon-address=node2.monerodevs.org:38089
+            - --rpc-bind-ip=0.0.0.0
+            - --rpc-bind-port=18082
+            - --confirm-external-bind
+            - --wallet-dir=/wallet
+            - --disable-rpc-login
+            - --log-level=1

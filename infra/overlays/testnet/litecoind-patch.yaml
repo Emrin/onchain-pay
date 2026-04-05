@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litecoind
+  namespace: crypto-demo
+spec:
+  template:
+    spec:
+      containers:
+        - name: litecoind
+          args:
+            - "-regtest"
+            - "-server"
+            - "-rpcuser=$(LITECOIND_RPC_USER)"
+            - "-rpcpassword=$(LITECOIND_RPC_PASSWORD)"
+            - "-rpcallowip=0.0.0.0/0"
+            - "-rpcbind=0.0.0.0"
+            - "-whitelist=0.0.0.0/0"
+            - "-listen=1"
+            - "-listenonion=0"
+            - "-datadir=/data"
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litecoind
+  namespace: crypto-demo
+spec:
+  ports:
+    - $patch: replace
+    - name: rpc
+      port: 19443
+      targetPort: 19443
+    - name: p2p
+      port: 19444
+      targetPort: 19444

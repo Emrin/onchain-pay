@@ -3,23 +3,27 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  InternalServerErrorException,
   Logger,
-  UnauthorizedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { randomUUID } from 'crypto';
+import { AddressDerivationService } from '../chain/address-derivation.service';
+import { NbxplorerService } from '../chain/nbxplorer.service';
+import { XmrWalletService } from '../chain/xmr-wallet.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+const INVOICE_TTL_MS = parseInt(process.env.INVOICE_TTL_MS ?? '1800000', 10); // 30 min default
 
 @Injectable()
 export class DepositsService {
   private readonly logger = new Logger(DepositsService.name);
-  private readonly btcpayUrl =
-    process.env.BTCPAY_URL || 'http://btcpayserver:14142';
-  private readonly apiKey = process.env.BTCPAY_API_KEY!;
-  private readonly storeId = process.env.BTCPAY_STORE_ID!;
-  private readonly webhookSecret = process.env.BTCPAY_WEBHOOK_SECRET!;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly addressDerivation: AddressDerivationService,
+    private readonly nbxplorer: NbxplorerService,
+    private readonly xmrWallet: XmrWalletService,
+  ) {}
 
   async createDeposit(
     userId: number,
@@ -31,6 +35,7 @@ export class DepositsService {
     address: string;
     currency: string;
     status: string;
+    expiresAt: string;
   }> {
     // Enforce 1 pending invoice per user per currency
     const existing = await this.prisma.transaction.findFirst({
@@ -43,210 +48,78 @@ export class DepositsService {
         amountSats: existing.amountSats.toString(),
         address: existing.address,
         currency: existing.currency,
+        expiresAt: existing.expiresAt?.toISOString(),
       });
     }
 
-    const amountDecimal = (amountSats / 1e8).toFixed(8);
+    const invoiceId = randomUUID();
+    const expiresAt = new Date(Date.now() + INVOICE_TTL_MS);
+    let address: string;
 
-    const invoiceRes = await fetch(
-      `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `token ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          amount: amountDecimal,
+    if (currency === 'XMR') {
+      let sub: { address: string; index: number };
+      try {
+        sub = await this.xmrWallet.createSubaddress(invoiceId);
+      } catch (err) {
+        this.logger.error(`XMR wallet error: ${(err as Error).message}`);
+        throw new ServiceUnavailableException('XMR wallet is not available');
+      }
+      address = sub.address;
+
+      await this.prisma.transaction.create({
+        data: {
+          userId,
+          invoiceId,
+          amountSats: BigInt(amountSats),
+          address,
           currency,
-          metadata: { userId },
-          paymentMethods: [`${currency}-CHAIN`],
-        }),
-      },
-    );
+          status: 'pending',
+          subaddrIndex: sub.index,
+          expiresAt,
+        },
+      });
+    } else {
+      let derived: { address: string; index: number };
+      try {
+        derived = await this.addressDerivation.deriveNextAddress(currency);
+      } catch (err) {
+        this.logger.error(`Address derivation error for ${currency}: ${(err as Error).message}`);
+        throw new ServiceUnavailableException(`${currency} deposits are not configured`);
+      }
+      address = derived.address;
 
-    if (!invoiceRes.ok) {
-      const text = await invoiceRes.text();
-      this.logger.error(`BtcPayServer invoice creation failed: ${text}`);
-      throw new InternalServerErrorException('Failed to create payment invoice');
+      // Track address before persisting — if NBXplorer is unreachable we avoid
+      // creating an orphaned pending record that can never settle.
+      try {
+        await this.nbxplorer.trackAddress(currency, address);
+      } catch (err) {
+        this.logger.error(`NBXplorer track error for ${currency}: ${(err as Error).message}`);
+        throw new ServiceUnavailableException('Blockchain indexer is not available');
+      }
+
+      await this.prisma.transaction.create({
+        data: {
+          userId,
+          invoiceId,
+          amountSats: BigInt(amountSats),
+          address,
+          currency,
+          status: 'pending',
+          expiresAt,
+        },
+      });
     }
 
-    const invoice = (await invoiceRes.json()) as { id: string; status: string };
-    const invoiceId = invoice.id;
-
-    // Fetch payment methods to get the on-chain address
-    const pmRes = await fetch(
-      `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices/${invoiceId}/payment-methods`,
-      { headers: { Authorization: `token ${this.apiKey}` } },
-    );
-
-    if (!pmRes.ok) {
-      const text = await pmRes.text();
-      this.logger.error(`BtcPayServer payment-methods fetch failed: ${text}`);
-      throw new InternalServerErrorException('Failed to retrieve payment address');
-    }
-
-    const paymentMethods = (await pmRes.json()) as Array<{
-      paymentMethodId: string;
-      destination: string;
-    }>;
-
-    const method = paymentMethods.find(
-      (pm) => pm.paymentMethodId === `${currency}-CHAIN`,
-    );
-
-    if (!method) {
-      throw new InternalServerErrorException(
-        `${currency} on-chain payment method not found`,
-      );
-    }
-
-    await this.prisma.transaction.create({
-      data: {
-        userId,
-        invoiceId,
-        amountSats: BigInt(amountSats),
-        address: method.destination,
-        currency,
-        status: 'pending',
-      },
-    });
+    this.logger.log(`Created ${currency} deposit invoice ${invoiceId} for user ${userId}`);
 
     return {
       invoiceId,
       amountSats: amountSats.toString(),
-      address: method.destination,
+      address,
       currency,
       status: 'pending',
+      expiresAt: expiresAt.toISOString(),
     };
-  }
-
-  async handleWebhook(
-    payload: any,
-    signature: string,
-    rawBody: Buffer,
-  ): Promise<void> {
-    const expectedSig =
-      'sha256=' +
-      createHmac('sha256', this.webhookSecret)
-        .update(rawBody)
-        .digest('hex');
-
-    if (signature !== expectedSig) {
-      this.logger.warn('Webhook signature mismatch');
-      throw new UnauthorizedException('Invalid webhook signature');
-    }
-
-    const event = payload as {
-      type: string;
-      invoiceId?: string;
-      afterExpiration?: boolean;
-      payment?: { value: string };
-    };
-
-    this.logger.log(`Webhook event: ${event.type} invoiceId=${event.invoiceId}`);
-
-    switch (event.type) {
-      case 'InvoiceExpired':
-        if (event.invoiceId) await this.handleExpired(event.invoiceId);
-        break;
-      case 'InvoiceSettled':
-        if (!event.invoiceId) throw new BadRequestException('Missing invoiceId');
-        await this.handleSettled(event.invoiceId);
-        break;
-      case 'InvoicePaymentSettled':
-        // Only act on payments that arrived after the invoice expired —
-        // normal on-time payments are covered by InvoiceSettled above.
-        if (event.afterExpiration && event.invoiceId) {
-          await this.handleLatePayment(event.invoiceId, event.payment?.value);
-        }
-        break;
-      default:
-        // Other event types (InvoiceCreated, InvoiceProcessing, …) — ignore
-    }
-  }
-
-  private async handleExpired(invoiceId: string): Promise<void> {
-    const tx = await this.prisma.transaction.findUnique({ where: { invoiceId } });
-    if (!tx || tx.status !== 'pending') return;
-    await this.prisma.transaction.update({
-      where: { invoiceId },
-      data: { status: 'expired' },
-    });
-    this.logger.log(`Invoice ${invoiceId} marked as expired`);
-  }
-
-  private async handleSettled(invoiceId: string): Promise<void> {
-    const tx = await this.prisma.transaction.findUnique({ where: { invoiceId } });
-    if (!tx) {
-      this.logger.warn(`No transaction found for invoiceId=${invoiceId}`);
-      return;
-    }
-    if (tx.status === 'settled') {
-      this.logger.log(`Invoice ${invoiceId} already settled, skipping`);
-      return;
-    }
-
-    // Fetch actual paid amount from BtcPayServer to handle overpayments
-    const pmRes = await fetch(
-      `${this.btcpayUrl}/api/v1/stores/${this.storeId}/invoices/${invoiceId}/payment-methods`,
-      { headers: { Authorization: `token ${this.apiKey}` } },
-    );
-
-    let creditUnits = tx.amountSats;
-    if (pmRes.ok) {
-      const methods = (await pmRes.json()) as Array<{
-        paymentMethodId: string;
-        totalPaid: string;
-      }>;
-      const method = methods.find((m) => m.paymentMethodId === `${tx.currency}-CHAIN`);
-      if (method?.totalPaid) {
-        const paid = BigInt(Math.round(parseFloat(method.totalPaid) * 1e8));
-        if (paid > 0n) creditUnits = paid;
-      }
-    }
-
-    await this.creditUser(tx, invoiceId, creditUnits);
-  }
-
-  private async handleLatePayment(invoiceId: string, paymentValue?: string): Promise<void> {
-    const tx = await this.prisma.transaction.findUnique({ where: { invoiceId } });
-    if (!tx) {
-      this.logger.warn(`No transaction found for late payment invoiceId=${invoiceId}`);
-      return;
-    }
-    if (tx.status === 'settled') {
-      this.logger.log(`Invoice ${invoiceId} already settled, skipping late payment`);
-      return;
-    }
-
-    let creditUnits = tx.amountSats;
-    if (paymentValue) {
-      const paid = BigInt(Math.round(parseFloat(paymentValue) * 1e8));
-      if (paid > 0n) creditUnits = paid;
-    }
-
-    await this.creditUser(tx, invoiceId, creditUnits);
-    this.logger.log(`Late payment credited for invoice ${invoiceId}`);
-  }
-
-  private async creditUser(
-    tx: { userId: number; currency: string },
-    invoiceId: string,
-    creditUnits: bigint,
-  ): Promise<void> {
-    const balanceField = tx.currency === 'LTC' ? 'balanceLitoshi' : 'balanceSats';
-    await this.prisma.$transaction([
-      this.prisma.transaction.update({
-        where: { invoiceId },
-        data: { status: 'settled', amountSats: creditUnits },
-      }),
-      this.prisma.user.update({
-        where: { id: tx.userId },
-        data: { [balanceField]: { increment: creditUnits } },
-      }),
-    ]);
-    this.logger.log(`Credited ${creditUnits} ${tx.currency} to user ${tx.userId}`);
   }
 
   async getInvoiceStatus(invoiceId: string): Promise<{ status: string }> {
@@ -298,10 +171,10 @@ export class DepositsService {
 
   async getUserBalance(
     userId: number,
-  ): Promise<{ balanceSats: string; balanceLitoshi: string }> {
+  ): Promise<{ balanceSats: string; balanceLitoshi: string; balancePiconero: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { balanceSats: true, balanceLitoshi: true },
+      select: { balanceSats: true, balanceLitoshi: true, balancePiconero: true },
     });
 
     if (!user) throw new BadRequestException('User not found');
@@ -309,6 +182,7 @@ export class DepositsService {
     return {
       balanceSats: user.balanceSats.toString(),
       balanceLitoshi: user.balanceLitoshi.toString(),
+      balancePiconero: user.balancePiconero.toString(),
     };
   }
 }

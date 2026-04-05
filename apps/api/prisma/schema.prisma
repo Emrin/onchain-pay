@@ -16,6 +16,7 @@ model User {
   mnemonicConfirmed Boolean       @default(false)
   balanceSats       BigInt        @default(0)
   balanceLitoshi    BigInt        @default(0)
+  balancePiconero   BigInt        @default(0)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   transactions Transaction[]
@@ -28,15 +29,28 @@ model ExchangeRate {
 }
 
 model Transaction {
-  id         Int       @id @default(autoincrement())
-  userId     Int
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  invoiceId  String    @unique
-  amountSats BigInt
-  address    String    @default("")
-  currency   String    @default("BTC")
-  status     String    @default("pending")
-  deletedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoiceId     String    @unique
+  amountSats    BigInt
+  address       String    @default("")
+  currency      String    @default("BTC")
+  status        String    @default("pending")
+  confirmations Int       @default(0)
+  txid          String?
+  subaddrIndex  Int?
+  expiresAt     DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([address])
+  @@index([status, expiresAt])
+}
+
+model WalletConfig {
+  currency  String @id
+  xpub      String
+  nextIndex Int    @default(0)
 }

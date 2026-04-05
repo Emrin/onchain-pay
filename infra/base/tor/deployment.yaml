@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor
+  namespace: crypto-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tor
+  template:
+    metadata:
+      labels:
+        app: tor
+    spec:
+      containers:
+        - name: tor
+          image: dperson/torproxy:latest
+          ports:
+            - containerPort: 9050
+              name: socks5
+            - containerPort: 8118
+              name: privoxy
+          resources:
+            requests:
+              memory: "64Mi"
+            limits:
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tor
+  namespace: crypto-demo
+spec:
+  selector:
+    app: tor
+  ports:
+    - name: socks5
+      port: 9050
+      targetPort: 9050
+    - name: privoxy
+      port: 8118
+      targetPort: 8118

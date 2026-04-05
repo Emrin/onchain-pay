@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { getPrices, usdToSats, usdToLitoshis } from '../lib/prices';
+import { getPrices, usdToSats, usdToLitoshis, usdToPiconeros } from '../lib/prices';
 
 const token = Astro.cookies.get('token')?.value;
 if (!token) return Astro.redirect('/login');
@@ -17,9 +17,9 @@ if (Astro.request.method === 'POST') {
   const currency = formData.get('currency') as string;
 
   const amountSats =
-    currency === 'LTC'
-      ? usdToLitoshis(amountUsd, prices.ltcUsd)
-      : usdToSats(amountUsd, prices.btcUsd);
+    currency === 'XMR' ? usdToPiconeros(amountUsd, prices.xmrUsd) :
+    currency === 'LTC' ? usdToLitoshis(amountUsd, prices.ltcUsd) :
+    usdToSats(amountUsd, prices.btcUsd);
 
   try {
     const res = await fetch(`${API_URL}/api/deposits`, {
@@ -97,6 +97,7 @@ if (Astro.request.method === 'POST') {
             <select id="currency" name="currency" class="select select-bordered w-full" required>
               <option value="BTC">Bitcoin (BTC)</option>
               <option value="LTC">Litecoin (LTC)</option>
+              <option value="XMR">Monero (XMR)</option>
             </select>
           </div>
 
@@ -130,7 +131,7 @@ if (Astro.request.method === 'POST') {
             </div>
             <div class="flex justify-between font-medium">
               <span class="text-base-content/60">You'll deposit</span>
-              <span id="units-display">—</span>
+              <span id="units-display" class="select-all cursor-text">—</span>
             </div>
           </div>
 
@@ -147,18 +148,18 @@ if (Astro.request.method === 'POST') {
   </div>
 </Layout>
 
-<script define:vars={{ btcUsd: prices.btcUsd, ltcUsd: prices.ltcUsd }}>
+<script define:vars={{ btcUsd: prices.btcUsd, ltcUsd: prices.ltcUsd, xmrUsd: prices.xmrUsd }}>
   const currencySelect = document.getElementById('currency');
   const amountInput = document.getElementById('amountUsd');
   const rateDisplay = document.getElementById('rate-display');
   const unitsDisplay = document.getElementById('units-display');
   const minHint = document.getElementById('min-hint');
 
-  const rates = { BTC: btcUsd, LTC: ltcUsd };
-  const unitNames = { BTC: 'sats', LTC: 'litoshis' };
+  const rates = { BTC: btcUsd, LTC: ltcUsd, XMR: xmrUsd };
   const minimums = {
     BTC: { value: 20,  hint: 'Minimum $20 for BTC — on-chain fees make smaller deposits uneconomical.' },
     LTC: { value: 5,   hint: 'Minimum $5 for LTC — transaction fees are low.' },
+    XMR: { value: 5,   hint: 'Minimum $5 for XMR — Monero fees are low.' },
   };
 
   function update() {
@@ -174,9 +175,9 @@ if (Astro.request.method === 'POST') {
     rateDisplay.textContent = `1 ${currency} = $${rate.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 
     if (!isNaN(usd) && usd > 0) {
-      const units = Math.round((usd / rate) * 1e8);
-      const coin = (usd / rate).toFixed(8);
-      unitsDisplay.textContent = `${units.toLocaleString()} ${unitNames[currency]} (${coin} ${currency})`;
+      const decimals = currency === 'XMR' ? 12 : 8;
+      const coin = (usd / rate).toFixed(decimals).replace(/\.?0+$/, '');
+      unitsDisplay.textContent = `${coin} ${currency}`;
     } else {
       unitsDisplay.textContent = '—';
     }

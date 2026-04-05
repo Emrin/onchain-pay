@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bitcoind-data
+  namespace: crypto-demo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 15Gi  # pruned mainnet: ~5.5GB blocks + ~8GB chainstate/indexes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitcoind
+  namespace: crypto-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bitcoind
+  template:
+    metadata:
+      labels:
+        app: bitcoind
+    spec:
+      containers:
+        - name: bitcoind
+          image: btcpayserver/bitcoin:29.1
+          ports:
+            - containerPort: 8332
+              name: rpc
+            - containerPort: 8333
+              name: p2p
+          # Write bitcoin.conf directly via shell so credentials are never
+          # subject to Kubernetes $(VAR) substitution ordering constraints.
+          command: ["sh", "-c"]
+          args:
+            - |
+              mkdir -p /data
+              {
+                echo "server=1"
+                echo "prune=5500"
+                echo "rpcallowip=0.0.0.0/0"
+                echo "rpcbind=0.0.0.0"
+                echo "whitelist=0.0.0.0/0"
+                echo "listen=1"
+                echo "listenonion=0"
+                echo "rpcuser=${BITCOIND_RPC_USER}"
+                echo "rpcpassword=${BITCOIND_RPC_PASSWORD}"
+              } > /data/bitcoin.conf
+              exec bitcoind -datadir=/data -printtoconsole
+          env:
+            - name: BITCOIND_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: BITCOIND_RPC_USER
+            - name: BITCOIND_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: BITCOIND_RPC_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bitcoind-data

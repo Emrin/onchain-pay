@@ -12,6 +12,8 @@ node_modules
 .env.test.local
 .env.production.local
 infra/postgres/secret.env
+infra/wallet/secret.yaml
+infra/wallet/secret.testnet.yaml
 
 # Testing
 coverage
@@ -34,5 +36,6 @@ yarn-error.log*
 
 # Misc
 .idea
+.claude
 .DS_Store
 *.pem

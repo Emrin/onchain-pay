@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: xmr-wallet-data
+  namespace: crypto-demo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xmr-wallet
+  namespace: crypto-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: xmr-wallet
+  template:
+    metadata:
+      labels:
+        app: xmr-wallet
+    spec:
+      containers:
+        - name: wallet-rpc
+          image: btcpayserver/monero:0.18.3.4
+          command: ["monero-wallet-rpc"]
+          args:
+            - --daemon-address=4f2rpgo4zhejxvf7ho4pxxn5d7rawjglac3umiit7byuvpxt6c4jvsid.onion:18089
+            - --proxy=tor:9050
+            - --rpc-bind-ip=0.0.0.0
+            - --rpc-bind-port=18082
+            - --confirm-external-bind
+            - --wallet-dir=/wallet
+            - --disable-rpc-login
+            - --log-level=1
+          ports:
+            - containerPort: 18082
+              name: wallet-rpc
+          volumeMounts:
+            - name: data
+              mountPath: /wallet
+              subPath: wallets
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: xmr-wallet-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xmr-wallet
+  namespace: crypto-demo
+spec:
+  selector:
+    app: xmr-wallet
+  ports:
+    - name: wallet-rpc
+      port: 18082
+      targetPort: 18082

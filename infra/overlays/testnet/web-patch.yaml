@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: crypto-demo
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          env:
+            - name: NETWORK
+              value: regtest

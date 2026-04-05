@@ -1,6 +1,6 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import { getPrices, satsToUsd, litoshisToUsd, formatUsd } from '../../lib/prices';
+import { getPrices, satsToUsd, litoshisToUsd, piconerosToUsd, formatUsd } from '../../lib/prices';
 
 const token = Astro.cookies.get('token')?.value;
 if (!token) return Astro.redirect('/login');
@@ -11,21 +11,23 @@ const address = urlParams.get('address') ?? '';
 const amountSatsRaw = urlParams.get('amountSats') ?? '0';
 const currency = urlParams.get('currency') ?? 'BTC';
 const amountSats = Number(amountSatsRaw);
-const amountDecimal = (amountSats / 1e8).toFixed(8);
-const unit = currency === 'LTC' ? 'litoshis' : 'sats';
+const [divisor, decimals] = currency === 'XMR' ? [1e12, 12] : [1e8, 8];
+const amountDecimal = (amountSats / divisor).toFixed(decimals).replace(/\.?0+$/, '');
 
 const prices = await getPrices();
 const amountUsd = formatUsd(
-  currency === 'LTC'
-    ? litoshisToUsd(amountSats, prices.ltcUsd)
-    : satsToUsd(amountSats, prices.btcUsd),
+  currency === 'XMR' ? piconerosToUsd(amountSats, prices.xmrUsd) :
+  currency === 'LTC' ? litoshisToUsd(amountSats, prices.ltcUsd) :
+  satsToUsd(amountSats, prices.btcUsd),
 );
 
 const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
+const isRegtest = process.env.NETWORK === 'regtest';
 
-const mineCmd = currency === 'LTC'
-  ? `kubectl exec -n crypto-demo deployment/litecoind -- litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=litecoin generatetoaddress 1 ${address}`
-  : `kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=bitcoin generatetoaddress 1 ${address}`;
+const mineCmd =
+  currency === 'LTC'
+    ? `kubectl exec -n crypto-demo deployment/litecoind -- litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=changeme generatetoaddress 1 ${address}`
+    : `kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=changeme generatetoaddress 1 ${address}`;
 ---
 
 <Layout title="Pay Invoice">
@@ -53,36 +55,42 @@ const mineCmd = currency === 'LTC'
               type="text"
               readonly
               value={address}
-              class="input input-bordered w-full font-mono text-sm"
+              onclick="this.select()"
+              class="input input-bordered w-full font-mono text-sm cursor-pointer"
             />
             <button id="copy-btn" class="btn btn-outline btn-sm" title="Copy address">Copy</button>
           </div>
         </div>
 
-        <div class="stats stats-vertical sm:stats-horizontal shadow w-full">
+        <div class="stats shadow w-full">
           <div class="stat">
-            <div class="stat-title">Amount (USD)</div>
+            <div class="stat-title">Amount</div>
             <div class="stat-value text-primary text-xl">{amountUsd}</div>
-            <div class="stat-desc">{amountDecimal} {currency}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-title">Amount ({unit})</div>
-            <div class="stat-value text-xl">{amountSats.toLocaleString()}</div>
+            <div class="stat-desc select-all cursor-text">{amountDecimal} {currency}</div>
           </div>
         </div>
 
-        <div class="collapse collapse-arrow bg-base-200">
-          <input type="checkbox" />
-          <div class="collapse-title font-medium">
-            Regtest: mine a block to confirm
+        {currency === 'XMR' ? (
+          <div class="alert alert-info text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span>Monero testnet — confirmation takes a few minutes once your transaction is broadcast.</span>
           </div>
-          <div class="collapse-content">
-            <p class="text-xs text-base-content/70 mb-2">
-              On regtest, transactions need a mined block to settle. Run:
-            </p>
-            <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code id="mine-cmd">{mineCmd}</code></pre>
+        ) : isRegtest ? (
+          <div class="collapse collapse-arrow bg-base-200">
+            <input type="checkbox" />
+            <div class="collapse-title font-medium">
+              Regtest: mine a block to confirm
+            </div>
+            <div class="collapse-content">
+              <p class="text-xs text-base-content/70 mb-2">
+                On regtest, transactions need a mined block to settle. Run:
+              </p>
+              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code id="mine-cmd">{mineCmd}</code></pre>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div class="text-xs text-base-content/50">
           Invoice ID: <span class="font-mono">{invoiceId}</span>

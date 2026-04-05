@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { getPrices, satsToUsd, litoshisToUsd, formatUsd } from '../lib/prices';
+import { getPrices, satsToUsd, litoshisToUsd, piconerosToUsd, formatUsd } from '../lib/prices';
 
 const token = Astro.cookies.get('token')?.value;
 if (!token) return Astro.redirect('/login');
@@ -33,9 +33,9 @@ const [balanceRes, txRes, prices] = await Promise.all([
   getPrices(),
 ]);
 
-const { balanceSats, balanceLitoshi } = balanceRes.ok
+const { balanceSats, balanceLitoshi, balancePiconero } = balanceRes.ok
   ? await balanceRes.json()
-  : { balanceSats: '0', balanceLitoshi: '0' };
+  : { balanceSats: '0', balanceLitoshi: '0', balancePiconero: '0' };
 
 const { pending, history } = txRes.ok
   ? await txRes.json()
@@ -43,18 +43,21 @@ const { pending, history } = txRes.ok
 
 const balanceBtc = (Number(balanceSats) / 1e8).toFixed(8);
 const balanceLtc = (Number(balanceLitoshi) / 1e8).toFixed(8);
+const balanceXmr = (Number(balancePiconero) / 1e12).toFixed(12);
 const balanceBtcUsd = formatUsd(satsToUsd(balanceSats, prices.btcUsd));
 const balanceLtcUsd = formatUsd(litoshisToUsd(balanceLitoshi, prices.ltcUsd));
+const balanceXmrUsd = formatUsd(piconerosToUsd(balancePiconero, prices.xmrUsd));
 
-function toDecimal(units: string) {
-  return (Number(units) / 1e8).toFixed(8);
+function toDecimal(tx: Tx): string {
+  const [divisor, decimals] = tx.currency === 'XMR' ? [1e12, 12] : [1e8, 8];
+  return (Number(tx.amountSats) / divisor).toFixed(decimals).replace(/\.?0+$/, '');
 }
 
 function txToUsd(tx: Tx): string {
   const usd =
-    tx.currency === 'LTC'
-      ? litoshisToUsd(tx.amountSats, prices.ltcUsd)
-      : satsToUsd(tx.amountSats, prices.btcUsd);
+    tx.currency === 'XMR' ? piconerosToUsd(tx.amountSats, prices.xmrUsd) :
+    tx.currency === 'LTC' ? litoshisToUsd(tx.amountSats, prices.ltcUsd) :
+    satsToUsd(tx.amountSats, prices.btcUsd);
   return formatUsd(usd);
 }
 ---
@@ -72,12 +75,17 @@ function txToUsd(tx: Tx): string {
       <div class="stat">
         <div class="stat-title">BTC Balance</div>
         <div class="stat-value text-primary text-xl">{balanceBtcUsd}</div>
-        <div class="stat-desc">{balanceBtc} BTC · {Number(balanceSats).toLocaleString()} sats</div>
+        <div class="stat-desc">{balanceBtc} BTC</div>
       </div>
       <div class="stat">
         <div class="stat-title">LTC Balance</div>
         <div class="stat-value text-secondary text-xl">{balanceLtcUsd}</div>
-        <div class="stat-desc">{balanceLtc} LTC · {Number(balanceLitoshi).toLocaleString()} litoshis</div>
+        <div class="stat-desc">{balanceLtc} LTC</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">XMR Balance</div>
+        <div class="stat-value text-accent text-xl">{balanceXmrUsd}</div>
+        <div class="stat-desc">{balanceXmr} XMR</div>
       </div>
     </div>
 
@@ -93,12 +101,9 @@ function txToUsd(tx: Tx): string {
               <div class="flex items-center gap-2">
                 <span class="badge badge-warning">pending</span>
                 <span class="badge badge-outline badge-sm">{tx.currency}</span>
-                <span class="font-medium">
-                  {toDecimal(tx.amountSats)} {tx.currency}
-                  <span class="text-base-content/50 text-xs ml-1">({Number(tx.amountSats).toLocaleString()} {tx.currency === 'LTC' ? 'litoshis' : 'sats'})</span>
-                </span>
+                <span class="font-medium">{toDecimal(tx)} {tx.currency}</span>
               </div>
-              <div class="text-base-content/60 font-mono text-xs break-all">Invoice: {tx.invoiceId}</div>
+              <div class="text-base-content/60 font-mono text-xs break-all select-all cursor-text">Invoice: {tx.invoiceId}</div>
               <a
                 href={`/deposit/${tx.invoiceId}?amountSats=${tx.amountSats}&address=${encodeURIComponent(tx.address)}&currency=${tx.currency}`}
                 class="btn btn-sm btn-outline mt-1 w-fit"
@@ -142,7 +147,7 @@ function txToUsd(tx: Tx): string {
                     </td>
                     <td class="font-medium">{txToUsd(tx)}</td>
                     <td class="font-mono text-sm text-base-content/60">
-                      {toDecimal(tx.amountSats)} {tx.currency}
+                      {toDecimal(tx)} {tx.currency}
                     </td>
                     <td>
                       <span class={`badge badge-sm ${tx.status === 'settled' ? 'badge-success' : tx.status === 'expired' ? 'badge-warning' : 'badge-error'}`}>

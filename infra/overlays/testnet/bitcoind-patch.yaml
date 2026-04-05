@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitcoind
+  namespace: crypto-demo
+spec:
+  template:
+    spec:
+      containers:
+        - name: bitcoind
+          # Write bitcoin.conf directly via shell so credentials are never
+          # subject to Kubernetes $(VAR) substitution ordering constraints.
+          # ${VAR} brace-syntax is passed through to the shell intact.
+          command: ["sh", "-c"]
+          args:
+            - |
+              mkdir -p /data
+              {
+                echo "[regtest]"
+                echo "server=1"
+                echo "rpcallowip=0.0.0.0/0"
+                echo "rpcbind=0.0.0.0"
+                echo "whitelist=0.0.0.0/0"
+                echo "listen=1"
+                echo "listenonion=0"
+                echo "rpcuser=${BITCOIND_RPC_USER}"
+                echo "rpcpassword=${BITCOIND_RPC_PASSWORD}"
+              } > /data/bitcoin.conf
+              exec bitcoind -datadir=/data -regtest -printtoconsole
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitcoind
+  namespace: crypto-demo
+spec:
+  ports:
+    - $patch: replace
+    - name: rpc
+      port: 18443
+      targetPort: 18443
+    - name: p2p
+      port: 18444
+      targetPort: 18444

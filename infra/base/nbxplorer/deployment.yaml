@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nbxplorer-data
+  namespace: crypto-demo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi  # mainnet BTC+LTC indexes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nbxplorer
+  namespace: crypto-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nbxplorer
+  template:
+    metadata:
+      labels:
+        app: nbxplorer
+    spec:
+      initContainers:
+        - name: init-db
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for postgres..."; sleep 2
+              done
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='nbxplorer'" \
+                | grep -q 1 || psql -h postgres -U postgres -c "CREATE DATABASE nbxplorer"
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+      containers:
+        - name: nbxplorer
+          image: nicolasdorier/nbxplorer:2.6.1
+          ports:
+            - containerPort: 32838
+          env:
+            - name: NBXPLORER_NETWORK
+              value: mainnet
+            - name: NBXPLORER_BIND
+              value: "0.0.0.0:32838"
+            - name: NBXPLORER_NOAUTH
+              value: "1"
+            - name: NBXPLORER_CHAINS
+              value: "BTC,LTC"
+            - name: NBXPLORER_BTCRPCURL
+              value: http://bitcoind:8332
+            - name: NBXPLORER_BTCRPCUSER
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: BITCOIND_RPC_USER
+            - name: NBXPLORER_BTCRPCPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: BITCOIND_RPC_PASSWORD
+            - name: NBXPLORER_BTCNODEENDPOINT
+              value: bitcoind:8333
+            - name: NBXPLORER_LTCRPCURL
+              value: http://litecoind:9332
+            - name: NBXPLORER_LTCRPCUSER
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: LITECOIND_RPC_USER
+            - name: NBXPLORER_LTCRPCPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-credentials
+                  key: LITECOIND_RPC_PASSWORD
+            - name: NBXPLORER_LTCNODEENDPOINT
+              value: litecoind:9333
+            - name: NBXPLORER_POSTGRES
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: NBXPLORER_POSTGRES
+          volumeMounts:
+            - name: data
+              mountPath: /datadir
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nbxplorer-data

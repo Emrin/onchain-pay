@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nbxplorer
+  namespace: crypto-demo
+spec:
+  template:
+    spec:
+      containers:
+        - name: nbxplorer
+          env:
+            - name: NBXPLORER_NETWORK
+              value: regtest
+            - name: NBXPLORER_BTCRPCURL
+              value: http://bitcoind:18443
+            - name: NBXPLORER_BTCNODEENDPOINT
+              value: bitcoind:18444
+            - name: NBXPLORER_LTCRPCURL
+              value: http://litecoind:19443
+            - name: NBXPLORER_LTCNODEENDPOINT
+              value: litecoind:19444
