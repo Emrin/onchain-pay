@@ -23,13 +23,14 @@ const amountUsd = formatUsd(
 
 const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
 const isRegtest = process.env.NETWORK === 'regtest';
+const k8sNamespace = process.env.K8S_NAMESPACE || 'crypto-demo';
 
 // Confirmations required to settle — must mirror nbxplorer-poller.service.ts and xmr-poller.service.ts
 const required = currency === 'XMR' ? 10 : currency === 'LTC' ? 6 : 2;
 
 const kubectlExec = currency === 'LTC'
-  ? `kubectl exec -n crypto-demo deployment/litecoind --`
-  : `kubectl exec -n crypto-demo deployment/bitcoind --`;
+  ? `kubectl exec -n ${k8sNamespace} deployment/litecoind --`
+  : `kubectl exec -n ${k8sNamespace} deployment/bitcoind --`;
 // Credentials are env vars inside the container sourced from the wallet-credentials secret.
 // $VAR syntax (no braces) is not interpolated by TypeScript template literals but resolves
 // correctly in the container shell when the user runs the command.
@@ -110,7 +111,7 @@ const confirmHint =
             <input
               type="text"
               readonly
-              value={`${amountDecimal} ${currency}`}
+              value={amountDecimal}
               onclick="this.select()"
               class="input input-bordered w-full font-mono text-sm cursor-pointer"
             />
@@ -121,11 +122,22 @@ const confirmHint =
         </div>
 
         {currency === 'XMR' ? (
-          <div class="alert alert-info text-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            <span>Monero stagenet — confirmation takes a few minutes once your transaction is broadcast.</span>
+          <div class="collapse collapse-arrow bg-base-200">
+            <input type="checkbox" />
+            <div class="collapse-title font-medium">
+              Stagenet: how to get XMR to test with
+            </div>
+            <div class="collapse-content">
+              <p class="text-xs text-base-content/70 mb-2">
+                This invoice uses <strong>Monero stagenet</strong> — a stable test network with worthless coins.
+                You need a stagenet wallet and stagenet XMR to pay.
+              </p>
+              <ol class="text-xs text-base-content/70 list-decimal list-inside space-y-1 mb-2">
+                <li>In the Monero GUI wallet, go to <strong>Settings → Node</strong> and switch to <strong>Stagenet</strong>, or create a new wallet and choose Stagenet as the network. Stagenet addresses start with <strong>5</strong>.</li>
+                <li>Get free stagenet XMR from a faucet — see the list at <a href="https://docs.getmonero.org/infrastructure/networks/#stagenet" target="_blank" rel="noopener" class="link">docs.getmonero.org/infrastructure/networks/#stagenet</a>.</li>
+                <li>Send exactly the amount above to the deposit address. Payment will be credited after {required} confirmations (~{required * 2} min).</li>
+              </ol>
+            </div>
           </div>
         ) : isRegtest ? (
           <div class="collapse collapse-arrow bg-base-200">
@@ -137,7 +149,10 @@ const confirmHint =
               <p class="text-xs text-base-content/70 mb-3">
                 On regtest no real funds exist — mine blocks directly to the deposit address to simulate a payment. Run this command <strong>{required} times</strong> to reach settlement (each run = 1 confirmation).
               </p>
-              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code>{mineCmd}</code></pre>
+              <div class="flex items-start gap-2">
+                <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all flex-1 cursor-text select-all" id="mine-cmd-pre">{mineCmd}</pre>
+                <button id="copy-mine-btn" class="btn btn-outline btn-sm shrink-0 mt-0" title="Copy command">Copy</button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -180,6 +195,18 @@ const confirmHint =
 
     attachCopy(copyBtn);
     attachCopy(copyAmountBtn);
+
+    const copyMineBtn = document.getElementById('copy-mine-btn');
+    copyMineBtn?.addEventListener('click', () => {
+      const pre = document.getElementById('mine-cmd-pre');
+      if (pre) {
+        navigator.clipboard.writeText(pre.textContent ?? '').then(() => {
+          const original = copyMineBtn.textContent;
+          copyMineBtn.textContent = 'Copied!';
+          setTimeout(() => { copyMineBtn.textContent = original; }, 1500);
+        });
+      }
+    });
 
     function formatAmount(units) {
       // divisor is 1e12 for XMR, 1e8 for BTC/LTC

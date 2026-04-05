@@ -39,3 +39,5 @@ spec:
                   key: JWT_SECRET
             - name: NETWORK
               value: mainnet
+            - name: K8S_NAMESPACE
+              value: crypto-demo
