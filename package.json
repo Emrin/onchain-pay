@@ -8,7 +8,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,astro,md}\"",
     "check-types": "turbo run check-types",
     "cluster:up": "bash scripts/cluster-up.sh",
-    "cluster:up-testnet": "bash scripts/cluster-up.sh testnet",
+    "cluster:up-dev": "bash scripts/cluster-up.sh dev",
     "cluster:down": "bash scripts/cluster-down.sh",
     "cluster:redeploy-api": "bash scripts/redeploy.sh api",
     "cluster:redeploy-web": "bash scripts/redeploy.sh web",

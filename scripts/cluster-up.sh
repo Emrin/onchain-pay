@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Brings up the full k3d cluster.
 #
-#   bash scripts/cluster-up.sh           → mainnet
-#   bash scripts/cluster-up.sh testnet   → regtest/stagenet (fast, no real funds)
+#   bash scripts/cluster-up.sh       → mainnet
+#   bash scripts/cluster-up.sh dev   → regtest BTC/LTC + XMR stagenet (no real funds)
 #
 # Requires: k3d, kubectl, docker
 set -euo pipefail
@@ -19,8 +19,8 @@ need k3d
 need kubectl
 need docker
 
-if [[ "$MODE" != "mainnet" && "$MODE" != "testnet" ]]; then
-  echo "Usage: $0 [mainnet|testnet]"
+if [[ "$MODE" != "mainnet" && "$MODE" != "dev" ]]; then
+  echo "Usage: $0 [mainnet|dev]"
   exit 1
 fi
 
@@ -33,9 +33,9 @@ fi
 
 WALLET_SECRET="${ROOT}/infra/wallet/secret.yaml"
 WALLET_EXAMPLE="${ROOT}/infra/wallet/secret.yaml.example"
-if [[ "$MODE" == "testnet" ]]; then
-  WALLET_SECRET="${ROOT}/infra/wallet/secret.testnet.yaml"
-  WALLET_EXAMPLE="${ROOT}/infra/wallet/secret.testnet.yaml.example"
+if [[ "$MODE" == "dev" ]]; then
+  WALLET_SECRET="${ROOT}/infra/wallet/secret.dev.yaml"
+  WALLET_EXAMPLE="${ROOT}/infra/wallet/secret.dev.yaml.example"
 fi
 
 if [[ ! -f "$WALLET_SECRET" ]]; then
@@ -85,9 +85,9 @@ kubectl create secret generic postgres-credentials \
 kubectl apply -f "$WALLET_SECRET"
 
 # ── 6. Apply manifests via Kustomize ───────────────────────────────────────────
-if [[ "$MODE" == "testnet" ]]; then
-  info "Applying testnet overlay (regtest BTC/LTC + XMR stagenet)..."
-  kubectl apply -k "${ROOT}/infra/overlays/testnet/"
+if [[ "$MODE" == "dev" ]]; then
+  info "Applying dev overlay (regtest BTC/LTC + XMR stagenet)..."
+  kubectl apply -k "${ROOT}/infra/overlays/dev/"
 else
   info "Applying mainnet manifests..."
   kubectl apply -k "${ROOT}/infra/base/"
@@ -110,8 +110,8 @@ kubectl rollout status deployment/web        -n crypto-demo --timeout=120s
 # ── 9. Summary ─────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════════════╗"
-if [[ "$MODE" == "testnet" ]]; then
-echo "║  Cluster ready  [TESTNET / REGTEST]                             ║"
+if [[ "$MODE" == "dev" ]]; then
+echo "║  Cluster ready  [DEV — regtest BTC/LTC + XMR stagenet]          ║"
 else
 echo "║  Cluster ready  [MAINNET]                                       ║"
 fi

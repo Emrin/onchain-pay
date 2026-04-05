@@ -13,7 +13,7 @@ node_modules
 .env.production.local
 infra/postgres/secret.env
 infra/wallet/secret.yaml
-infra/wallet/secret.testnet.yaml
+infra/wallet/secret.dev.yaml
 
 # Testing
 coverage

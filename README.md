@@ -189,26 +189,26 @@ kubectl logs -n crypto-demo deploy/nbxplorer -f
 
 ---
 
-### Testnet cluster (regtest BTC/LTC + XMR stagenet)
+### Dev cluster (regtest BTC/LTC + XMR stagenet)
 
 Use this when you want to test the full deposit flow without real funds. BTC/LTC run in regtest mode (instant block mining on demand), XMR connects to a public stagenet node.
 
-**1. Create testnet wallet credentials**
+**1. Create dev wallet credentials**
 
 ```bash
-cp infra/wallet/secret.testnet.yaml.example infra/wallet/secret.testnet.yaml
+cp infra/wallet/secret.dev.yaml.example infra/wallet/secret.dev.yaml
 ```
 
-Edit `secret.testnet.yaml` — fill in `BTC_XPUB` and `LTC_XPUB` with keys from an **Electrum testnet wallet** (native segwit, starts with `vpub`). Leave RPC passwords as-is for local testing.
+Edit `secret.dev.yaml` — fill in `BTC_XPUB` and `LTC_XPUB` with keys from an **Electrum testnet wallet** (native segwit, starts with `vpub`). Leave RPC passwords as-is for local testing.
 
-**2. Start the testnet cluster**
+**2. Start the dev cluster**
 
 ```bash
-pnpm cluster:up-testnet
-# or: bash scripts/cluster-up.sh testnet
+pnpm cluster:up-dev
+# or: bash scripts/cluster-up.sh dev
 ```
 
-The testnet overlay patches: `regtest` network for BTC/LTC, matching port numbers (18443/18444 for BTC, 19443/19444 for LTC), reduced PVC sizes (1 Gi each), and `--stagenet` for the XMR wallet with a public clearnet stagenet node.
+The dev overlay patches: `regtest` network for BTC/LTC, matching port numbers (18443/18444 for BTC, 19443/19444 for LTC), and `--stagenet` for the XMR wallet with a public clearnet stagenet node.
 
 **3. Mine blocks to trigger settlement**
 
@@ -225,7 +225,7 @@ bitcoin-cli -regtest -rpcport=18443 -rpcuser=bitcoin -rpcpassword=changeme \
 
 ## After code changes (k3d only)
 
-The cluster does not hot-reload. After editing source code, use the targeted redeploy scripts — they rebuild only the affected image and restart that deployment. Only re-run `cluster:up` / `cluster:up-testnet` when secrets or infra manifests change.
+The cluster does not hot-reload. After editing source code, use the targeted redeploy scripts — they rebuild only the affected image and restart that deployment. Only re-run `cluster:up` / `cluster:up-dev` when secrets or infra manifests change.
 
 ```bash
 pnpm cluster:redeploy-api   # after API (NestJS) changes
@@ -282,7 +282,7 @@ crypto-demo/
 ```bash
 # Cluster lifecycle
 pnpm cluster:up                  # mainnet cluster
-pnpm cluster:up-testnet          # testnet cluster (regtest BTC/LTC + XMR stagenet)
+pnpm cluster:up-dev              # dev cluster (regtest BTC/LTC + XMR stagenet)
 pnpm cluster:down                # delete cluster (data is lost)
 
 # Database / local dev
