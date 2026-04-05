@@ -74,6 +74,18 @@ export class NbxplorerPollerService implements OnModuleInit {
       });
       if (!pending) continue;
 
+      // If a txid is already recorded, ignore any new transaction to the same address.
+      // In regtest this prevents subsequent coinbase txs (mined for confirmations) from
+      // overwriting the tracked txid; handleNewBlock continues counting confirmations on
+      // the original tx. In production this means we track the first payment only —
+      // a second tx to the same invoice address (e.g. wallet splits payment) is ignored.
+      if (pending.txid && pending.txid !== txData.transactionHash) {
+        this.logger.warn(
+          `${currency} invoice ${pending.invoiceId}: ignoring extra tx ${txData.transactionHash} (already tracking ${pending.txid})`,
+        );
+        continue;
+      }
+
       if (confirmations < required) {
         // Store the actual on-chain amount now so handleNewBlock credits the
         // received amount (not the invoice amount) when it later settles.

@@ -30,16 +30,17 @@ const required = currency === 'XMR' ? 10 : currency === 'LTC' ? 6 : 2;
 const kubectlExec = currency === 'LTC'
   ? `kubectl exec -n crypto-demo deployment/litecoind --`
   : `kubectl exec -n crypto-demo deployment/bitcoind --`;
-const nodeCliCmd = currency === 'LTC'
-  ? `litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=changeme`
-  : `bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=changeme`;
-// Step 1: mine 1 block directly to the deposit address → coinbase tx detected by NBXplorer.
-// generatetoaddress needs no wallet; any overpayment (block reward > invoice) is credited as-received.
-const payCmd = `${kubectlExec} ${nodeCliCmd} generatetoaddress 1 ${address}`;
-// Step 2: mine confirmation blocks to a throwaway address so no extra txs land on the deposit address.
-// getnewaddress requires the pre-created wallet (-rpcwallet=default); generatetoaddress does not.
-// sh -c runs inside the container so $() resolves there.
-const confirmCmd = `${kubectlExec} sh -c '${nodeCliCmd} generatetoaddress 1 $(${nodeCliCmd} -rpcwallet=default getnewaddress)'`;
+// Credentials are env vars inside the container sourced from the wallet-credentials secret.
+// $VAR syntax (no braces) is not interpolated by TypeScript template literals but resolves
+// correctly in the container shell when the user runs the command.
+const rpcFlags = currency === 'LTC'
+  ? `-rpcuser="$LITECOIND_RPC_USER" -rpcpassword="$LITECOIND_RPC_PASSWORD"`
+  : `-rpcuser="$BITCOIND_RPC_USER" -rpcpassword="$BITCOIND_RPC_PASSWORD"`;
+const nodeCli = currency === 'LTC' ? 'litecoin-cli -regtest' : 'bitcoin-cli -regtest';
+// Mine every block to the deposit address. The first coinbase is the payment tx;
+// subsequent ones are ignored by the poller (txid already set), but each new block
+// increments the confirmation count on the original tx. No wallet needed.
+const mineCmd = `${kubectlExec} sh -c '${nodeCli} ${rpcFlags} generatetoaddress 1 ${address}'`;
 
 const confirmHint =
   currency === 'XMR'
@@ -114,12 +115,9 @@ const confirmHint =
             </div>
             <div class="collapse-content">
               <p class="text-xs text-base-content/70 mb-3">
-                On regtest no real funds exist — use the CLI to simulate a payment and then mine blocks to confirm it.
+                On regtest no real funds exist — mine blocks directly to the deposit address to simulate a payment. Run this command <strong>{required} times</strong> to reach settlement (each run = 1 confirmation).
               </p>
-              <p class="text-xs font-semibold text-base-content/80 mb-1">Step 1 — mine a block to the deposit address (run once)</p>
-              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all mb-3"><code>{payCmd}</code></pre>
-              <p class="text-xs font-semibold text-base-content/80 mb-1">Step 2 — mine confirmation blocks to a throwaway address (run {required - 1}× more to settle)</p>
-              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code>{confirmCmd}</code></pre>
+              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code>{mineCmd}</code></pre>
             </div>
           </div>
         ) : null}
