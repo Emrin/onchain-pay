@@ -52,6 +52,17 @@ export class NbxplorerService {
     this.logger.log(`Tracking ${currency} address ${address}`);
   }
 
+  async getTransactionConfirmations(currency: string, txid: string): Promise<number | null> {
+    const res = await fetch(
+      `${this.baseUrl}/v1/cryptos/${this.cryptoCode(currency)}/transactions/${txid}`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`NBXplorer getTx failed: ${res.status}`);
+    const data = await res.json() as { confirmations?: number };
+    return data.confirmations ?? 0;
+  }
+
   /** Long-poll for new events. Returns immediately if events exist, else blocks up to ~30s. */
   async longPollEvents(
     currency: string,

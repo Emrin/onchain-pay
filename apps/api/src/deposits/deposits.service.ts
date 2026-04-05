@@ -122,14 +122,16 @@ export class DepositsService {
     };
   }
 
-  async getInvoiceStatus(invoiceId: string): Promise<{ status: string }> {
+  async getInvoiceStatus(
+    invoiceId: string,
+  ): Promise<{ status: string; confirmations: number; txid: string | null }> {
     const transaction = await this.prisma.transaction.findUnique({
       where: { invoiceId },
-      select: { status: true },
+      select: { status: true, confirmations: true, txid: true },
     });
 
     if (!transaction) throw new BadRequestException('Invoice not found');
-    return { status: transaction.status };
+    return transaction;
   }
 
   async getUserTransactions(userId: number): Promise<{

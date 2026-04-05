@@ -36,16 +36,22 @@ export class XmrPollerService implements OnModuleInit {
     const transfers = await this.xmrWallet.getTransfers();
 
     for (const transfer of transfers) {
-      if (transfer.confirmations < XMR_CONFIRMATIONS_REQUIRED) continue;
-
       const pending = await this.prisma.transaction.findFirst({
-        where: {
-          address: transfer.address,
-          currency: 'XMR',
-          status: 'pending',
-        },
+        where: { address: transfer.address, currency: 'XMR', status: 'pending' },
       });
       if (!pending) continue;
+
+      if (transfer.confirmations < XMR_CONFIRMATIONS_REQUIRED) {
+        // Update confirmation count for progress display even before settling.
+        await this.prisma.transaction.update({
+          where: { id: pending.id },
+          data: { confirmations: transfer.confirmations, txid: transfer.txid },
+        });
+        this.logger.log(
+          `XMR tx ${transfer.txid} has ${transfer.confirmations}/${XMR_CONFIRMATIONS_REQUIRED} confirmations`,
+        );
+        continue;
+      }
 
       const updated = await this.prisma.transaction.updateMany({
         where: { id: pending.id, status: 'pending' },

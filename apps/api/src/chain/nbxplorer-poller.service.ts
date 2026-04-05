@@ -2,7 +2,13 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NbxplorerService } from './nbxplorer.service';
 
-const CONFIRMATIONS_REQUIRED: Record<string, number> = { BTC: 1, LTC: 1 };
+// LTC needs more confirmations than BTC — it's a smaller PoW chain and
+// meaningfully more susceptible to reorgs on mainnet.
+// NOTE: reorgs after these thresholds are not actively unwound — the thresholds
+// are chosen to make reorgs practically impossible, not to handle them.
+// These are security parameters and are intentionally hardcoded, not derived
+// from NETWORK — an accidental env var change should not lower the bar.
+const CONFIRMATIONS_REQUIRED: Record<string, number> = { BTC: 2, LTC: 6 };
 
 @Injectable()
 export class NbxplorerPollerService implements OnModuleInit {
@@ -47,12 +53,18 @@ export class NbxplorerPollerService implements OnModuleInit {
     currency: string,
     event: Awaited<ReturnType<NbxplorerService['longPollEvents']>>[number],
   ): Promise<void> {
+    if (event.type === 'newblock') {
+      await this.handleNewBlock(currency);
+      return;
+    }
+
     if (event.type !== 'newtransaction') return;
 
+    // newtransaction: first detection — record txid and initial confirmations.
     const txData = event.data.transactionData;
     if (!txData) return;
 
-    const required = CONFIRMATIONS_REQUIRED[currency] ?? 1;
+    const required = CONFIRMATIONS_REQUIRED[currency] ?? 2;
     const confirmations = txData.confirmations ?? 0;
 
     for (const output of event.data.outputs ?? []) {
@@ -76,6 +88,42 @@ export class NbxplorerPollerService implements OnModuleInit {
           BigInt(Math.round(output.value ?? 0)),
           txData.transactionHash,
           confirmations,
+        );
+      }
+    }
+  }
+
+  /** On each new block, re-query confirmation counts for all in-flight transactions.
+   *  NBXplorer only emits newtransaction once (first detection) — subsequent
+   *  confirmation increments are only visible by querying the transaction directly. */
+  private async handleNewBlock(currency: string): Promise<void> {
+    const inFlight = await this.prisma.transaction.findMany({
+      where: { currency, status: 'pending', txid: { not: null } },
+    });
+    if (inFlight.length === 0) return;
+
+    const required = CONFIRMATIONS_REQUIRED[currency] ?? 2;
+
+    for (const tx of inFlight) {
+      if (!tx.txid) continue;
+      try {
+        const confirmations = await this.nbx.getTransactionConfirmations(currency, tx.txid);
+        if (confirmations === null) continue; // tx not found — likely a reorg, leave pending
+
+        if (confirmations >= required) {
+          await this.settle(tx, tx.amountSats, tx.txid, confirmations);
+        } else if (confirmations > tx.confirmations) {
+          await this.prisma.transaction.update({
+            where: { id: tx.id },
+            data: { confirmations },
+          });
+          this.logger.log(
+            `${currency} tx ${tx.txid} has ${confirmations}/${required} confirmations`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `${currency} confirmation check failed for ${tx.txid}: ${(err as Error).message}`,
         );
       }
     }

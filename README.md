@@ -199,7 +199,7 @@ Use this when you want to test the full deposit flow without real funds. BTC/LTC
 cp infra/wallet/secret.dev.yaml.example infra/wallet/secret.dev.yaml
 ```
 
-Edit `secret.dev.yaml` — fill in `BTC_XPUB` and `LTC_XPUB` with keys from an **Electrum testnet wallet** (native segwit, starts with `vpub`). Leave RPC passwords as-is for local testing.
+The example already includes working regtest vpub keys — no wallet setup needed. Leave everything as-is for local testing.
 
 **2. Start the dev cluster**
 

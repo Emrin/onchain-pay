@@ -24,10 +24,26 @@ const amountUsd = formatUsd(
 const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || '';
 const isRegtest = process.env.NETWORK === 'regtest';
 
+// Confirmations required to settle — must mirror nbxplorer-poller.service.ts and xmr-poller.service.ts
+const required = currency === 'XMR' ? 10 : currency === 'LTC' ? 6 : 2;
+
+// Mine 1 block at a time so users can watch confirmations increment
+// First mine sends funds to the deposit address (creates the payment tx).
+// Subsequent mines go to a throwaway address so only one coinbase tx lands
+// on the deposit address — subsequent blocks just add confirmations to it.
+const cli = currency === 'LTC'
+  ? `kubectl exec -n crypto-demo deployment/litecoind -- litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=changeme`
+  : `kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=changeme`;
 const mineCmd =
-  currency === 'LTC'
-    ? `kubectl exec -n crypto-demo deployment/litecoind -- litecoin-cli -regtest -rpcuser=litecoin -rpcpassword=changeme generatetoaddress 1 ${address}`
-    : `kubectl exec -n crypto-demo deployment/bitcoind -- bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=changeme generatetoaddress 1 ${address}`;
+  `${cli} generatetoaddress 1 ${address}   # run once to send funds\n` +
+  `${cli} generatetoaddress 1 $(${cli} getnewaddress)  # run ${required - 1}× more to confirm`;
+
+const confirmHint =
+  currency === 'XMR'
+    ? `Each Monero block takes ~2 minutes. Your payment will be credited after ${required} confirmations (~${required * 2} min).`
+    : currency === 'LTC'
+    ? `Each Litecoin block takes ~2.5 minutes. Your payment will be credited after ${required} confirmations (~${Math.round(required * 2.5)} min).`
+    : `Each Bitcoin block takes ~10 minutes. Your payment will be credited after ${required} confirmations (~${required * 10} min).`;
 ---
 
 <Layout title="Pay Invoice">
@@ -36,7 +52,7 @@ const mineCmd =
       <div class="card-body gap-5">
         <div class="flex items-center justify-between">
           <h1 class="card-title text-2xl">{currency} Payment</h1>
-          <span id="status-badge" class="badge badge-warning badge-lg">pending</span>
+          <span id="status-badge" class="badge badge-warning badge-lg">waiting</span>
         </div>
 
         <div id="success-alert" class="alert alert-success hidden">
@@ -44,6 +60,16 @@ const mineCmd =
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span>Payment settled! Your balance has been credited.</span>
+        </div>
+
+        <!-- Confirmation progress — hidden until a txid appears -->
+        <div id="confirm-row" class="hidden">
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-base-content/70">Confirmations</span>
+            <span id="confirm-count" class="font-mono font-semibold">0 / {required}</span>
+          </div>
+          <progress id="confirm-bar" class="progress progress-info w-full" value="0" max={required}></progress>
+          <p class="text-xs text-base-content/50 mt-1">{confirmHint}</p>
         </div>
 
         <div class="form-control gap-1">
@@ -85,9 +111,9 @@ const mineCmd =
             </div>
             <div class="collapse-content">
               <p class="text-xs text-base-content/70 mb-2">
-                On regtest, transactions need a mined block to settle. Run:
+                On regtest, transactions need a mined block to confirm. Run this once per confirmation ({required} times to settle):
               </p>
-              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code id="mine-cmd">{mineCmd}</code></pre>
+              <pre class="bg-base-300 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all"><code>{mineCmd}</code></pre>
             </div>
           </div>
         ) : null}
@@ -103,10 +129,13 @@ const mineCmd =
     </div>
   </div>
 
-  <script define:vars={{ invoiceId, PUBLIC_API_URL }}>
+  <script define:vars={{ invoiceId, PUBLIC_API_URL, required }}>
     const apiBase = PUBLIC_API_URL || '';
     const statusBadge = document.getElementById('status-badge');
     const successAlert = document.getElementById('success-alert');
+    const confirmRow = document.getElementById('confirm-row');
+    const confirmCount = document.getElementById('confirm-count');
+    const confirmBar = document.getElementById('confirm-bar');
     const copyBtn = document.getElementById('copy-btn');
 
     copyBtn?.addEventListener('click', () => {
@@ -122,13 +151,30 @@ const mineCmd =
 
     let polling = true;
 
-    function updateBadge(status) {
+    function updateUI(status, confirmations, txid) {
       if (!statusBadge) return;
-      statusBadge.textContent = status;
-      statusBadge.className = 'badge badge-lg';
-      if (status === 'settled') statusBadge.classList.add('badge-success');
-      else if (status === 'pending') statusBadge.classList.add('badge-warning');
-      else statusBadge.classList.add('badge-error');
+
+      if (status === 'settled') {
+        statusBadge.textContent = 'settled';
+        statusBadge.className = 'badge badge-lg badge-success';
+        successAlert?.classList.remove('hidden');
+        confirmRow?.classList.add('hidden');
+      } else if (txid) {
+        // Transaction seen on-chain, counting confirmations
+        statusBadge.textContent = 'confirming';
+        statusBadge.className = 'badge badge-lg badge-info';
+        confirmRow?.classList.remove('hidden');
+        if (confirmCount) confirmCount.textContent = `${confirmations} / ${required}`;
+        if (confirmBar) {
+          confirmBar.value = confirmations;
+          confirmBar.max = required;
+        }
+      } else {
+        // Waiting for payment to appear
+        statusBadge.textContent = 'waiting';
+        statusBadge.className = 'badge badge-lg badge-warning';
+        confirmRow?.classList.add('hidden');
+      }
     }
 
     async function pollStatus() {
@@ -137,16 +183,13 @@ const mineCmd =
         const res = await fetch(`${apiBase}/api/deposits/status/${invoiceId}`);
         if (res.ok) {
           const data = await res.json();
-          updateBadge(data.status);
-          if (data.status === 'settled') {
-            polling = false;
-            if (successAlert) successAlert.classList.remove('hidden');
-          }
+          updateUI(data.status, data.confirmations ?? 0, data.txid ?? null);
+          if (data.status === 'settled') polling = false;
         }
       } catch { /* ignore */ }
       if (polling) setTimeout(pollStatus, 5000);
     }
 
-    setTimeout(pollStatus, 5000);
+    void pollStatus();
   </script>
 </Layout>
