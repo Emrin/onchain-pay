@@ -122,16 +122,26 @@ export class DepositsService {
     };
   }
 
-  async getInvoiceStatus(
-    invoiceId: string,
-  ): Promise<{ status: string; confirmations: number; txid: string | null }> {
-    const transaction = await this.prisma.transaction.findUnique({
+  async getInvoiceStatus(invoiceId: string): Promise<{
+    status: string;
+    confirmations: number;
+    txid: string | null;
+    invoiceAmount: string;
+    receivedAmount: string | null;
+  }> {
+    const tx = await this.prisma.transaction.findUnique({
       where: { invoiceId },
-      select: { status: true, confirmations: true, txid: true },
+      select: { status: true, confirmations: true, txid: true, amountSats: true, receivedSats: true },
     });
 
-    if (!transaction) throw new BadRequestException('Invoice not found');
-    return transaction;
+    if (!tx) throw new BadRequestException('Invoice not found');
+    return {
+      status: tx.status,
+      confirmations: tx.confirmations,
+      txid: tx.txid,
+      invoiceAmount: tx.amountSats.toString(),
+      receivedAmount: tx.receivedSats?.toString() ?? null,
+    };
   }
 
   async getUserTransactions(userId: number): Promise<{
@@ -146,6 +156,7 @@ export class DepositsService {
     const serialize = (tx: (typeof txs)[number]) => ({
       ...tx,
       amountSats: tx.amountSats.toString(),
+      receivedSats: tx.receivedSats?.toString() ?? null,
     });
 
     return {

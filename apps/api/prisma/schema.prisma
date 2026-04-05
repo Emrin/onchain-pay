@@ -33,7 +33,8 @@ model Transaction {
   userId        Int
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   invoiceId     String    @unique
-  amountSats    BigInt
+  amountSats    BigInt                  // invoice requested amount — never mutated after creation
+  receivedSats  BigInt?                 // actual on-chain amount; set on first tx detection
   address       String    @default("")
   currency      String    @default("BTC")
   status        String    @default("pending")

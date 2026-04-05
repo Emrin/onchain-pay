@@ -147,17 +147,23 @@ export class XmrWalletService implements OnModuleInit {
     }>
   > {
     await this.ensureWalletOpen();
-    const result = await this.rpc<{
-      in?: Array<{
-        address: string;
-        amount: number;
-        txid: string;
-        confirmations: number;
-        subaddr_index: { minor: number };
-      }>;
-    }>('get_transfers', { in: true, pending: false });
 
-    return (result.in ?? []).map((t) => ({
+    type XmrTransfer = {
+      address: string;
+      amount: number;
+      txid: string;
+      confirmations: number;
+      subaddr_index: { minor: number };
+    };
+
+    // `in` = confirmed incoming; `pool` = unconfirmed incoming (mempool).
+    // `pending` controls outgoing only — set false to avoid processing our own sends.
+    const result = await this.rpc<{ in?: XmrTransfer[]; pool?: XmrTransfer[] }>(
+      'get_transfers',
+      { in: true, pool: true, pending: false },
+    );
+
+    return [...(result.in ?? []), ...(result.pool ?? [])].map((t) => ({
       address: t.address,
       amount: BigInt(t.amount),
       txid: t.txid,

@@ -41,11 +41,24 @@ export class XmrPollerService implements OnModuleInit {
       });
       if (!pending) continue;
 
+      // Ignore additional transfers to the same subaddress while an invoice is pending.
+      // Only the first transaction is tracked — same policy as BTC/LTC.
+      if (pending.txid && pending.txid !== transfer.txid) {
+        this.logger.warn(
+          `XMR invoice ${pending.invoiceId}: ignoring extra transfer ${transfer.txid} (already tracking ${pending.txid})`,
+        );
+        continue;
+      }
+
       if (transfer.confirmations < XMR_CONFIRMATIONS_REQUIRED) {
-        // Update confirmation count for progress display even before settling.
+        // Update confirmation count and record actual received amount for progress display.
         await this.prisma.transaction.update({
           where: { id: pending.id },
-          data: { confirmations: transfer.confirmations, txid: transfer.txid },
+          data: {
+            confirmations: transfer.confirmations,
+            txid: transfer.txid,
+            receivedSats: transfer.amount,
+          },
         });
         this.logger.log(
           `XMR tx ${transfer.txid} has ${transfer.confirmations}/${XMR_CONFIRMATIONS_REQUIRED} confirmations`,
@@ -53,11 +66,13 @@ export class XmrPollerService implements OnModuleInit {
         continue;
       }
 
+      const status = transfer.amount >= pending.amountSats ? 'settled' : 'underpaid';
+
       const updated = await this.prisma.transaction.updateMany({
         where: { id: pending.id, status: 'pending' },
         data: {
-          status: 'settled',
-          amountSats: transfer.amount,
+          status,
+          receivedSats: transfer.amount,
           txid: transfer.txid,
           confirmations: transfer.confirmations,
         },
@@ -70,9 +85,17 @@ export class XmrPollerService implements OnModuleInit {
         data: { balancePiconero: { increment: transfer.amount } },
       });
 
-      this.logger.log(
-        `Settled XMR tx ${transfer.txid}: credited ${transfer.amount} piconero to user ${pending.userId}`,
-      );
+      if (status === 'underpaid') {
+        this.logger.warn(
+          `XMR invoice ${pending.invoiceId}: underpaid — ` +
+          `received ${transfer.amount}, invoiced ${pending.amountSats}. ` +
+          `Credited received amount to user ${pending.userId}.`,
+        );
+      } else {
+        this.logger.log(
+          `Settled XMR tx ${transfer.txid}: credited ${transfer.amount} piconero to user ${pending.userId}`,
+        );
+      }
     }
   }
 }

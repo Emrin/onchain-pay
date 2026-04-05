@@ -66,6 +66,16 @@ const confirmHint =
           <span>Payment settled! Your balance has been credited.</span>
         </div>
 
+        <div id="underpaid-alert" class="alert alert-warning hidden">
+          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p id="underpaid-msg" class="font-semibold"></p>
+            <p class="text-sm mt-1">Your balance was credited the received amount. <a href="/deposit" class="link">Create a new deposit</a> for the remainder.</p>
+          </div>
+        </div>
+
         <!-- Confirmation progress — hidden until a txid appears -->
         <div id="confirm-row" class="hidden">
           <div class="flex justify-between text-sm mb-1">
@@ -92,12 +102,22 @@ const confirmHint =
           </div>
         </div>
 
-        <div class="stats shadow w-full">
-          <div class="stat">
-            <div class="stat-title">Amount</div>
-            <div class="stat-value text-primary text-xl">{amountUsd}</div>
-            <div class="stat-desc select-all cursor-text">{amountDecimal} {currency}</div>
+        <div class="form-control gap-1">
+          <label class="label">
+            <span class="label-text font-semibold">Amount to send</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <input
+              type="text"
+              readonly
+              value={`${amountDecimal} ${currency}`}
+              onclick="this.select()"
+              class="input input-bordered w-full font-mono text-sm cursor-pointer"
+            />
+            <button id="copy-amount-btn" class="btn btn-outline btn-sm" title="Copy amount">Copy</button>
           </div>
+          <p class="text-sm text-base-content/60 pl-1">{amountUsd}</p>
+          <p class="text-xs text-base-content/50 pl-1 mt-1">Send exactly this amount in a single transaction. Only the first transaction to this address will be credited — do not split payments across multiple sends.</p>
         </div>
 
         {currency === 'XMR' ? (
@@ -133,29 +153,42 @@ const confirmHint =
     </div>
   </div>
 
-  <script define:vars={{ invoiceId, PUBLIC_API_URL, required }}>
+  <script define:vars={{ invoiceId, PUBLIC_API_URL, required, divisor, currency }}>
     const apiBase = PUBLIC_API_URL || '';
     const statusBadge = document.getElementById('status-badge');
     const successAlert = document.getElementById('success-alert');
+    const underpaidAlert = document.getElementById('underpaid-alert');
+    const underpaidMsg = document.getElementById('underpaid-msg');
     const confirmRow = document.getElementById('confirm-row');
     const confirmCount = document.getElementById('confirm-count');
     const confirmBar = document.getElementById('confirm-bar');
     const copyBtn = document.getElementById('copy-btn');
+    const copyAmountBtn = document.getElementById('copy-amount-btn');
 
-    copyBtn?.addEventListener('click', () => {
-      const input = copyBtn.previousElementSibling;
-      if (input instanceof HTMLInputElement) {
-        navigator.clipboard.writeText(input.value).then(() => {
-          const original = copyBtn.textContent;
-          copyBtn.textContent = 'Copied!';
-          setTimeout(() => { copyBtn.textContent = original; }, 1500);
-        });
-      }
-    });
+    function attachCopy(btn) {
+      btn?.addEventListener('click', () => {
+        const input = btn.previousElementSibling;
+        if (input instanceof HTMLInputElement) {
+          navigator.clipboard.writeText(input.value).then(() => {
+            const original = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = original; }, 1500);
+          });
+        }
+      });
+    }
+
+    attachCopy(copyBtn);
+    attachCopy(copyAmountBtn);
+
+    function formatAmount(units) {
+      // divisor is 1e12 for XMR, 1e8 for BTC/LTC
+      return (Number(units) / divisor).toFixed(divisor === 1e12 ? 12 : 8).replace(/\.?0+$/, '');
+    }
 
     let polling = true;
 
-    function updateUI(status, confirmations, txid) {
+    function updateUI(status, confirmations, txid, invoiceAmount, receivedAmount) {
       if (!statusBadge) return;
 
       if (status === 'settled') {
@@ -163,6 +196,20 @@ const confirmHint =
         statusBadge.className = 'badge badge-lg badge-success';
         successAlert?.classList.remove('hidden');
         confirmRow?.classList.add('hidden');
+        polling = false;
+      } else if (status === 'underpaid') {
+        statusBadge.textContent = 'underpaid';
+        statusBadge.className = 'badge badge-lg badge-warning';
+        underpaidAlert?.classList.remove('hidden');
+        confirmRow?.classList.add('hidden');
+        if (underpaidMsg && receivedAmount && invoiceAmount) {
+          const received = formatAmount(receivedAmount);
+          const invoiced = formatAmount(invoiceAmount);
+          const shortfall = formatAmount(BigInt(invoiceAmount) - BigInt(receivedAmount));
+          underpaidMsg.textContent =
+            `Received ${received} ${currency} — invoice was for ${invoiced} ${currency} (short by ${shortfall} ${currency}).`;
+        }
+        polling = false;
       } else if (txid) {
         // Transaction seen on-chain, counting confirmations
         statusBadge.textContent = 'confirming';
@@ -187,8 +234,13 @@ const confirmHint =
         const res = await fetch(`${apiBase}/api/deposits/status/${invoiceId}`);
         if (res.ok) {
           const data = await res.json();
-          updateUI(data.status, data.confirmations ?? 0, data.txid ?? null);
-          if (data.status === 'settled') polling = false;
+          updateUI(
+            data.status,
+            data.confirmations ?? 0,
+            data.txid ?? null,
+            data.invoiceAmount ?? null,
+            data.receivedAmount ?? null,
+          );
         }
       } catch { /* ignore */ }
       if (polling) setTimeout(pollStatus, 5000);

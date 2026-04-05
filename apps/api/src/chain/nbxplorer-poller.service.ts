@@ -86,24 +86,20 @@ export class NbxplorerPollerService implements OnModuleInit {
         continue;
       }
 
+      const receivedUnits = BigInt(Math.round(output.value ?? 0));
+
       if (confirmations < required) {
-        // Store the actual on-chain amount now so handleNewBlock credits the
-        // received amount (not the invoice amount) when it later settles.
-        const receivedUnits = BigInt(Math.round(output.value ?? 0));
+        // Record the actual on-chain amount alongside the txid so that
+        // handleNewBlock can credit the correct amount when it settles.
         await this.prisma.transaction.update({
           where: { id: pending.id },
-          data: { confirmations, txid: txData.transactionHash, amountSats: receivedUnits },
+          data: { confirmations, txid: txData.transactionHash, receivedSats: receivedUnits },
         });
         this.logger.log(
           `${currency} tx ${txData.transactionHash} has ${confirmations}/${required} confirmations`,
         );
       } else {
-        await this.settle(
-          pending,
-          BigInt(Math.round(output.value ?? 0)),
-          txData.transactionHash,
-          confirmations,
-        );
+        await this.settle(pending, receivedUnits, txData.transactionHash, confirmations);
       }
     }
   }
@@ -126,7 +122,8 @@ export class NbxplorerPollerService implements OnModuleInit {
         if (confirmations === null) continue; // tx not found — likely a reorg, leave pending
 
         if (confirmations >= required) {
-          await this.settle(tx, tx.amountSats, tx.txid, confirmations);
+          // Use receivedSats recorded at first detection; fall back to amountSats if somehow null.
+          await this.settle(tx, tx.receivedSats ?? tx.amountSats, tx.txid, confirmations);
         } else if (confirmations > tx.confirmations) {
           await this.prisma.transaction.update({
             where: { id: tx.id },
@@ -145,28 +142,38 @@ export class NbxplorerPollerService implements OnModuleInit {
   }
 
   private async settle(
-    pending: { id: number; userId: number; currency: string; amountSats: bigint },
-    creditUnits: bigint,
+    pending: { id: number; userId: number; invoiceId: string; currency: string; amountSats: bigint },
+    receivedUnits: bigint,
     txid: string,
     confirmations: number,
   ): Promise<void> {
     const balanceField =
       pending.currency === 'LTC' ? 'balanceLitoshi' : 'balanceSats';
 
+    const status = receivedUnits >= pending.amountSats ? 'settled' : 'underpaid';
+
     const updated = await this.prisma.transaction.updateMany({
       where: { id: pending.id, status: 'pending' },
-      data: { status: 'settled', amountSats: creditUnits, txid, confirmations },
+      data: { status, receivedSats: receivedUnits, txid, confirmations },
     });
 
     if (updated.count === 0) return; // already settled or expired — bail
 
     await this.prisma.user.update({
       where: { id: pending.userId },
-      data: { [balanceField]: { increment: creditUnits } },
+      data: { [balanceField]: { increment: receivedUnits } },
     });
 
-    this.logger.log(
-      `Settled ${pending.currency} tx ${txid}: credited ${creditUnits} to user ${pending.userId}`,
-    );
+    if (status === 'underpaid') {
+      this.logger.warn(
+        `${pending.currency} invoice ${pending.invoiceId}: underpaid — ` +
+        `received ${receivedUnits}, invoiced ${pending.amountSats}. ` +
+        `Credited received amount to user ${pending.userId}.`,
+      );
+    } else {
+      this.logger.log(
+        `Settled ${pending.currency} tx ${txid}: credited ${receivedUnits} to user ${pending.userId}`,
+      );
+    }
   }
 }
