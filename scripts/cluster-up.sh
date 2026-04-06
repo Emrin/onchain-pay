@@ -5,7 +5,9 @@
 #   bash scripts/cluster-up.sh dev   → regtest BTC/LTC + XMR stagenet (no real funds)
 #
 # Requires: k3d, kubectl, docker
-set -euo pipefail
+set -eu
+# pipefail is bash-only; skip silently if unavailable (e.g. Windows sh)
+set -o pipefail 2>/dev/null || true
 
 CLUSTER="crypto"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

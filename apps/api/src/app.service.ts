@@ -10,8 +10,8 @@ export class AppService {
     return 'Hello from NestJS!';
   }
 
-  async healthCheck(): Promise<{ redis: string }> {
-    const pong = await this.redis.ping();
-    return { redis: pong };
+  async healthCheck(): Promise<{ status: string }> {
+    await this.redis.ping();
+    return { status: 'ok' };
   }
 }

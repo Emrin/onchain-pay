@@ -6,7 +6,8 @@
 #
 # Use this after code changes instead of a full cluster:up.
 # Re-run cluster:up only when secrets or infra manifests change.
-set -euo pipefail
+set -eu
+set -o pipefail 2>/dev/null || true
 
 CLUSTER="crypto"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

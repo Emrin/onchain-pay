@@ -13,7 +13,7 @@ export class AppController {
   }
 
   @Get('health')
-  healthCheck(): Promise<{ redis: string }> {
+  healthCheck(): Promise<{ status: string }> {
     return this.appService.healthCheck();
   }
 }
